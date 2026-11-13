@@ -1,0 +1,119 @@
+@@@ identity
+productid=BT8
+odmpid=ZenWiFi_BT8
+firmver=3.0.0.6
+buildno=102
+extendno=58601-gbeaed27_514-g99923_M7EE
+lan_ipaddr=10.0.10.1
+lan_netmask=255.255.254.0
+sw_mode=1
+re_mode=0
+cfg_master=1
+wl_ifnames=ra0 rai0 rax0
+sta_ifnames=
+lan_ifnames=lan1 lan2 eth2 ra0 rai0 rax0 ra1 ra2 rai1 rax1
+@@@ tools
+wl: MISSING
+iw: /usr/sbin/iw
+iwpriv: /bin/iwpriv
+iwconfig: /bin/iwconfig
+mwctl: /usr/sbin/mwctl
+hostapd_cli: /usr/bin/hostapd_cli
+wlanconfig: MISSING
+cfg80211tool: MISSING
+apstats: MISSING
+@@@ uptime
+279899.12 1100000.00
+0.31 0.28 0.25 2/180 4242
+@@@ iw_dev
+phy#2
+	Interface rax0
+		ifindex 21
+		wdev 0x200000001
+		addr 02:00:00:00:01:66
+		ssid HIDDENBACKHAUL0000
+		type AP
+		channel 85 (6375 MHz), width: 320 MHz, center1: 6265 MHz
+		txpower 19.00 dBm
+phy#0
+	Interface ra1
+		ifindex 12
+		wdev 0x1
+		addr 02:00:00:00:01:64
+		ssid TestNet
+		type AP
+		channel 11 (2462 MHz), width: 20 MHz, center1: 2462 MHz
+		txpower 23.00 dBm
+@@@ iwconfig
+@@@ net_dev
+Inter-|   Receive                                                |  Transmit
+ face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed
+  ppp0: 1000000 2000 0 0 0 0 0 0 3000000 4000 0 0 0 0 0 0
+   ra1: 500 10 0 0 0 0 0 0 700 12 0 1 0 0 0 0
+@@@ log
+Nov 13 13:41:51 roamast: determine candidate node [0e:00:00:00:02:45](rssi: -60dbm) for client [0a:00:00:00:00:01](rssi: -71dbm from client)(rssi: -71dbm from ap) to roam
+Nov 13 13:41:51 roamast: Roam a client [0a:00:00:00:00:01], status [0]
+Nov 13 13:42:10 hapdevent: hapdevent_proc_event(347): ra1: Assoc 02:aa:00:00:00:02
+Nov 13 13:42:24 roamast: [EXAP]Deauth old sta in wl1.1: 0a:00:00:00:00:01, because sta is already connected to 02:00:00:00:01:60.
+Nov 13 13:42:24 roamast: rai1: disconnect weak signal strength station [0a:00:00:00:00:01]
+Nov 13 13:42:24 hapdevent: hapdevent_proc_event(381): rai1: Disassoc 0a:00:00:00:00:01
+Nov 13 13:42:24 roamast: rai1: remove client [0a:00:00:00:00:01] from monitor list
+@@@ mwctl_stat:ra0
+
+CurrentTemperature			 = 53
+Tx success                             = 15100170
+Tx fail count                          = 2821208, PER=15.7%
+Rx success                             = 146346284
+Rx with CRC                            = 42842625, PER=22.6%
+Last TX Rate                           = MCS1, BW20, 0.8us GI, HT_MM, STBC, LDPC
+proxy arp enable                       = 0
+WNM BSS Transition Management enable   = 1
+@@@ mwctl_stat:rai0
+CurrentTemperature			 = 53
+Tx fail count                          = 3416292, PER=6.1%
+Rx with CRC                            = 9564331, PER=4.5%
+@@@ sta_hostapd:ra1
+02:aa:00:00:00:02
+flags=[AUTH][ASSOC][AUTHORIZED][MFP]
+aid=0
+rx_packets=41134
+tx_packets=39340
+rx_bytes=3241280
+tx_bytes=2743328
+inactive_msec=0
+signal=-47
+rx_rate_info=722 mcs 7 shortGI
+tx_rate_info=289 mcs 3 shortGI
+connected_time=11940
+02:aa:00:00:00:03
+flags=[AUTH][ASSOC][AUTHORIZED][MFP]
+rx_bytes=10954368
+tx_bytes=330765568
+inactive_msec=26000
+signal=-40
+rx_rate_info=60
+tx_rate_info=780 vhtmcs 8 vhtnss 1
+connected_time=13873
+@@@ settings
+wl0_igs=0
+wl0_mrate_x=0
+wl0_user_rssi=-70
+emf_enable=0
+@@@ cfg_device_list
+<ZenWiFi_BT8>10.0.10.1>02:00:00:00:01:64>1<ZenWiFi_BT8>10.0.11.29>02:00:00:00:01:60>0<ZenWiFi_BD4>10.0.11.14>02:00:00:00:02:44>0
+@@@ clientlist
+{"02:00:00:00:01:64":{"2G_1":{"02:aa:00:00:00:02":{"ip":"10.0.11.4","rssi":"-47"},"02:aa:00:00:00:03":{"ip":"10.0.11.194","rssi":"-39"}},"wired_mac":{"02:bb:00:00:00:01":{"ip":"10.0.10.203"}}},"02:00:00:00:01:60":{"5G":{"0a:00:00:00:00:01":{"ip":"10.0.11.130","rssi":"-71"}}},"02:00:00:00:03:e8":{"2G_2":{"02:aa:00:00:00:09":{"ip":"","rssi":"-43"}}}}
+@@@ allwclientlist
+{"02:00:00:00:01:64":{"2G_1":{"02:aa:00:00:00:02":{"ts":1794583410,"ifname":"ra1","wifi_auth":"WPA3-SAE","mlo_active":0}}}}
+@@@ wiredclientlist
+{"02:00:00:00:01:64":{"02:bb:00:00:00:01":{"ts":1794583470}}}
+@@@ relist
+{"02:00:00:00:02:44":{"sta2g":"06:00:00:00:02:44","sta5g":"06:00:00:00:02:45","sta6g":""}}
+@@@ nmp_clients
+{"02:aa:00:00:00:02":{"mac":"02:aa:00:00:00:02","name":"Test-Laptop","vendor":"MSFT 5.0","type":30,"online":1,"wireless":1,"name_src":"dnsmasq.leases"},"02:bb:00:00:00:01":{"mac":"02:bb:00:00:00:01","name":"NAS","vendor":"Synology","online":1,"wireless":0}}
+@@@ leases
+86400 02:aa:00:00:00:03 10.0.11.194 printer *
+@@@ node:02:00:00:00:01:60
+{"misc":{"cfg_alias":"First Floor"},"prefer_ap":{"amas_wlc_target_bssid":""}}
+@@@ node:02:00:00:00:03:E8
+{"misc":{"cfg_alias":"Garden"},"prefer_ap":{"amas_wlc_target_bssid":""}}

@@ -1,0 +1,41 @@
+@@@ identity
+productid=BD4D5
+odmpid=ZenWiFi_BD4
+firmver=3.0.0.6
+buildno=102
+extendno=58396-g6c64ce0_553-g86403_Q7PA
+lan_ipaddr=10.0.11.14
+sw_mode=3
+re_mode=1
+cfg_master=0
+wl_ifnames=ath0 ath1
+@@@ tools
+wl: MISSING
+iw: /usr/sbin/iw
+iwpriv: /bin/iwpriv
+iwconfig: /bin/iwconfig
+mwctl: MISSING
+hostapd_cli: /usr/bin/hostapd_cli
+wlanconfig: /usr/sbin/wlanconfig
+cfg80211tool: /usr/sbin/cfg80211tool
+apstats: /usr/sbin/apstats
+@@@ iwconfig
+ath0      IEEE 802.11ax  ESSID:"TestNet"
+          Mode:Master  Frequency:2.462 GHz  Access Point: 02:00:00:00:02:44
+          Bit Rate:574 Mb/s   Tx-Power=20 dBm
+          Link Quality=94/94  Signal level=-51 dBm  Noise level=-94 dBm
+ath1      IEEE 802.11ax  ESSID:"TestNet"
+          Mode:Master  Frequency:5.18 GHz  Access Point: 02:00:00:00:02:45
+          Link Quality=75/94  Signal level=-65 dBm  Noise level=-92 dBm
+lo        no wireless extensions.
+@@@ net_dev
+  ath0: 100 1 0 0 0 0 0 0 200 2 0 0 0 0 0 0
+@@@ log
+Nov 12 17:04:38 kernel: [396236.786569] wlan: [0:I:ANY] [MLME] vap-1(ath001): [02:aa:00:00:00:05]_ieee80211_node_leave: station with aid 4 , rssi=-46, leaves (refcnt 4),
+Nov 12 17:07:00 kernel: [396378.595550] [MLME] vap-1(ath001):wlan_mlme_assoc_resp assoc failed with status 30 error 0 pmf 1
+Nov 12 17:01:34 hapdevent: hapdevent_proc_event(347): ath001: Assoc 02:aa:00:00:00:05
+Nov 12 17:02:49 hapdevent: hapdevent_proc_event(381): initiator=ap: Disassoc 02:aa:00:00:00:05
+Nov 12 17:22:13 roamast: ath001: disconnect weak signal strength station [02:aa:00:00:00:05]
+@@@ sta_wlanconfig:ath001
+ADDR               AID CHAN TXRATE RXRATE RSSI MINRSSI MAXRSSI IDLE  TXSEQ  RXSEQ  CAPS XCAPS ACAPS     ERP    STATE MAXRATE(DOT11) HTCAPS   VHTCAPS ASSOCTIME    IEs   MODE
+02:aa:00:00:00:05    1   11  72M     58M  -50     -58     -44   17      0   65535  EPSs  NULL NULL    0          f          96000               P            0gRS 08:11:46 RSN WME IEEE80211_MODE_11AXG_HE20

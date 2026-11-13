@@ -1,0 +1,71 @@
+"""The only commands the ASUS collector ever runs (read-only allow-list, D-04).
+
+Each poll sends one shell script to a unit over SSH. Output is split into
+sections by ``@@@ <key>`` marker lines. Nothing here writes state, restarts a
+service or triggers a radio scan. Secrets are never read: there is no
+``nvram show``; nvram is read key by key from the allow-lists below.
+"""
+from __future__ import annotations
+
+IDENTITY_KEYS = ["productid", "odmpid", "firmver", "buildno", "extendno", "lan_ipaddr", "lan_netmask",
+                 "sw_mode", "re_mode", "cfg_master", "wl_ifnames", "sta_ifnames", "lan_ifnames"]
+
+# Settings that matter for diagnosis (docs/05-asus-aimesh.md, "Settings found that matter").
+_BAND_KEYS = ["ifname", "ssid", "closed", "chanspec", "channel", "bw", "mrate_x", "igs", "user_rssi", "rateset",
+              "11ax", "11be", "txpower", "bss_enabled", "mfp"]
+SETTINGS_KEYS = (
+    [f"wl{b}_{k}" for b in range(4) for k in _BAND_KEYS]
+    + [f"wl{b}.{g}_{k}" for b in range(4) for g in (1, 2, 3) for k in ("bss_enabled", "ssid", "closed", "ifname")]
+    + ["smart_connect_x", "emf_enable", "mr_enable_x", "upnp_enable", "wps_enable", "misc_http_x", "dmz_ip",
+       "vts_enable_x", "dhcp_start", "dhcp_end", "dhcp_lease", "wan0_proto", "wan0_state_t", "wan0_ipaddr",
+       "sshd_enable", "sshd_port", "time_zone_x"]
+)
+
+TOOLS = ["wl", "iw", "iwpriv", "iwconfig", "mwctl", "hostapd_cli", "wlanconfig", "cfg80211tool", "apstats"]
+
+LOG_PATTERN = "hapdevent|roamast|ieee80211_node_leave|assoc failed with status"
+
+
+def _nvram_block(key: str, keys: list[str]) -> str:
+    gets = "; ".join(f'echo "{k}=$(nvram get {k} 2>/dev/null)"' for k in keys)
+    return f'echo "@@@ {key}"; {gets}'
+
+
+def unit_script(main: bool, first_poll: bool, full: bool) -> str:
+    """Batch script for one unit. ``first_poll`` also reads the rotated log; ``full`` adds settings."""
+    log_files = "/tmp/syslog.log-1 /tmp/syslog.log" if first_poll else "/tmp/syslog.log"
+    lines = [
+        _nvram_block("identity", IDENTITY_KEYS),
+        'echo "@@@ tools"; for t in ' + " ".join(TOOLS) + '; do p=$(which $t 2>/dev/null); echo "$t: ${p:-MISSING}"; done',
+        'echo "@@@ uptime"; cat /proc/uptime /proc/loadavg 2>/dev/null',
+        'echo "@@@ iw_dev"; iw dev 2>/dev/null',
+        'echo "@@@ iwconfig"; iwconfig 2>/dev/null',
+        'echo "@@@ net_dev"; cat /proc/net/dev',
+        f'echo "@@@ log"; cat {log_files} 2>/dev/null | grep -E "{LOG_PATTERN}" | tail -n 3000',
+        # MediaTek: radio health per band, stations per SSID interface.
+        'if command -v mwctl >/dev/null 2>&1; then for i in $(nvram get wl_ifnames); do '
+        'echo "@@@ mwctl_stat:$i"; mwctl dev $i stat 2>/dev/null; done; fi',
+        'if command -v hostapd_cli >/dev/null 2>&1; then for i in $(ls /sys/class/net | grep -E "^(ra|rai|rax)[0-9]+$"); do '
+        'case $i in ra0|rai0|rax0) continue;; esac; echo "@@@ sta_hostapd:$i"; hostapd_cli -i $i all_sta 2>/dev/null; done; fi',
+        # Qualcomm: stations per VAP.
+        'if command -v wlanconfig >/dev/null 2>&1; then for i in $(ls /sys/class/net | grep -E "^ath[0-9]{3}$"); do '
+        'echo "@@@ sta_wlanconfig:$i"; wlanconfig $i list sta 2>/dev/null; done; fi',
+    ]
+    if full:
+        lines.append(_nvram_block("settings", SETTINGS_KEYS))
+    if main:
+        lines += [
+            'echo "@@@ cfg_device_list"; nvram get cfg_device_list',
+            'echo "@@@ clientlist"; cat /tmp/clientlist.json 2>/dev/null',
+            'echo "@@@ allwclientlist"; cat /tmp/allwclientlist.json 2>/dev/null',
+            'echo "@@@ wiredclientlist"; cat /tmp/wiredclientlist.json 2>/dev/null',
+            'echo "@@@ relist"; cat /tmp/relist.json 2>/dev/null',
+        ]
+        if full:
+            lines += [
+                'echo "@@@ nmp_clients"; cat /jffs/nmp_cl_json.js 2>/dev/null',
+                'echo "@@@ leases"; cat /var/lib/misc/dnsmasq.leases 2>/dev/null',
+                'for f in /tmp/[0-9A-F][0-9A-F]:*.json; do [ -f "$f" ] && { echo "@@@ node:$(basename $f .json)"; cat "$f"; }; done',
+                'echo "@@@ port_status"; cat /tmp/diag_port_status.json 2>/dev/null',
+            ]
+    return "\n".join(lines) + "\n"

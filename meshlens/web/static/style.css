@@ -1,0 +1,54 @@
+:root {
+  --bg: #f5f7fa; --card: #ffffff; --text: #1d2430; --muted: #66707d; --line: #e2e6ec;
+  --accent: #2463eb; --good: #1a8f4a; --warn: #c27a00; --bad: #c4322b; --chip: #eef2f8;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #0e1218; --card: #171c24; --text: #e7ebf1; --muted: #8d97a5; --line: #2a313c;
+          --accent: #6b9bff; --good: #3fc274; --warn: #f0a63a; --bad: #ff6b61; --chip: #222a35; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; font: 14px/1.45 system-ui, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
+header { display: flex; align-items: center; gap: 24px; padding: 10px 20px; background: var(--card);
+         border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 2; flex-wrap: wrap; }
+.brand { font-weight: 700; font-size: 17px; } .logo { color: var(--accent); }
+nav { display: flex; gap: 4px; flex-wrap: wrap; }
+nav button { background: none; border: 0; padding: 6px 12px; border-radius: 6px; color: var(--muted); cursor: pointer; font: inherit; }
+nav button.on { background: var(--chip); color: var(--text); font-weight: 600; }
+.right { margin-left: auto; display: flex; gap: 12px; align-items: center; }
+main { padding: 20px; max-width: 1300px; margin: 0 auto; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin-bottom: 16px; overflow-x: auto; }
+.card h3 { margin: 0 0 10px; font-size: 15px; } .narrow { max-width: 520px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 16px; }
+.grid .card { margin-bottom: 0; } .grid { margin-bottom: 16px; }
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; white-space: nowrap; }
+th { color: var(--muted); font-weight: 600; font-size: 12px; }
+td.wrap { white-space: normal; }
+table.clickable tbody tr { cursor: pointer; } table.clickable tbody tr:hover { background: var(--chip); }
+.muted { color: var(--muted); } .small { font-size: 12px; } .error { color: var(--bad); min-height: 1em; }
+.good { color: var(--good); } .warn { color: var(--warn); } .bad { color: var(--bad); }
+.pill { display: inline-block; padding: 1px 8px; border-radius: 10px; background: var(--chip); font-size: 12px; }
+.mono { font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+input, select, button { font: inherit; }
+input[type=password], input[type=search], input:not([type]), input[type=number], select {
+  padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); }
+form label { display: block; margin: 10px 0; } form label input { display: block; width: 100%; margin-top: 4px; }
+form label.inline input { display: inline; width: auto; }
+button { background: var(--accent); color: #fff; border: 0; border-radius: 6px; padding: 7px 14px; cursor: pointer; }
+button.link { background: none; color: var(--accent); padding: 0; }
+.toolbar { display: flex; gap: 12px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
+.toolbar input[type=search] { min-width: 260px; }
+.finding { border-left: 4px solid var(--warn); padding: 6px 10px; margin: 6px 0; background: var(--chip); border-radius: 4px; }
+.finding.high { border-color: var(--bad); }
+aside#drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(620px, 100vw); background: var(--card);
+  border-left: 1px solid var(--line); box-shadow: -8px 0 24px rgba(0,0,0,.15); overflow-y: auto; padding: 16px 20px; z-index: 5; }
+.kv { display: grid; grid-template-columns: 150px 1fr; gap: 4px 12px; margin: 8px 0 14px; }
+.kv div:nth-child(odd) { color: var(--muted); }
+.timeline { list-style: none; padding: 0; margin: 0; }
+.timeline li { padding: 4px 0 4px 14px; border-left: 2px solid var(--line); position: relative; }
+.timeline li::before { content: ""; position: absolute; left: -5px; top: 10px; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.timeline li.kick::before, .timeline li.disconnect::before { background: var(--bad); }
+.timeline li.connect::before { background: var(--good); }
+.timeline li.roam_candidate::before, .timeline li.roam::before, .timeline li.moved_away::before { background: var(--warn); }
+canvas.spark { width: 100%; height: 70px; }
+@media (max-width: 600px) { main { padding: 10px; } .kv { grid-template-columns: 110px 1fr; } }
