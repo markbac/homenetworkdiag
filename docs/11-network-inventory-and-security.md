@@ -74,6 +74,20 @@ Beyond Wi-Fi: what is on the network, what each device offers, what is exposed, 
 | TOP-03 | **Managed switches** (if any): LLDP/SNMP for port-to-device mapping. | reuse `discovery/snmp_probe.py` | C |
 | TOP-04 | **Multicast groups** (IGMP membership) and the top multicast/broadcast senders on the wire (with Npcap), matched to what probes see in the air. | Npcap, router | S |
 
+## 7. Switches and powerline (wired infrastructure)
+
+Found on this network (13 November): a **UniFi USW-Flex-Mini** (10.0.10.2, SSH only), a **TP-Link Easy Smart switch** (10.0.10.195, web UI), three **devolo powerline adapters** (Office-Powerline 10.0.11.136, Hall-Powerline 10.0.11.9, Arlo-Powerline 10.0.11.236), all behind the main router; the router's 2.5G WAN port is linked at 1 Gbit/s.
+
+| ID | Requirement | Source | Pri |
+|---|---|---|---|
+| SW-01 | **Infer unmanaged switches**: several wired MACs behind one router/node port (bridge FDB `brctl showmacs`, `wiredclientlist.json`) shown as a switch on the map. | Router/nodes | M |
+| SW-02 | **TP-Link Easy Smart switches**: per-port link status/speed/duplex, good and bad packet counters, VLANs, loop prevention; read-only via the web UI with stored credentials (DPAPI). | Switch web UI | S |
+| SW-03 | **UniFi switches**: per-port speed, errors, drops, PoE, LLDP neighbours, uplink; via the UniFi Network controller API (read-only account) or device SSH (`mca-dump`, read-only). | Controller / device | S |
+| SW-04 | **devolo powerline**: data rates between every pair of adapters (tx/rx PHY rate), devices behind each adapter, firmware; via the devolo device API over IP (`devolo_plc_api`, as used by Home Assistant), from any PC on the LAN: no direct connection to an adapter is needed. devolo **Magic** adapters are G.hn (not HomePlug AV), so HomePlug tools such as open-plc-utils do not apply; API port and any password to be verified on the adapters. Flags slow or unstable powerline links (a common hidden cause of lag, and possibly the Office node's backhaul). | devolo API | M |
+| SW-05 | **Generic managed switches**: SNMP v2c/v3 (IF-MIB counters, BRIDGE-MIB/Q-BRIDGE-MIB port-to-MAC, LLDP-MIB), with credentials supplied by the user (never guessed). | SNMP (reuse `snmp_probe.py`) | C |
+| SW-06 | **Port health over time**: link flaps, speed drops (1G to 100M), error/drop rates per port, shown on the topology map and device pages. | All of the above | M |
+| SW-07 | **WAN port**: negotiated speed vs capability (2.5G port at 1G today) and errors. | Router `diag_port_status.json` | S |
+
 ## Dashboard additions
 
 - **Devices** page: identity (all names with sources), type, vendor, services (mDNS/SSDP), open ports with risk labels, web UI links, Wi-Fi security, SSID, history.
@@ -81,7 +95,7 @@ Beyond Wi-Fi: what is on the network, what each device offers, what is exposed, 
 - **Exposure** page: router port forwards, UPnP mappings (which device opened what), DMZ, NAT type, WAN/IPv6 status.
 - **Security** page: hygiene checks with plain-English explanations, inventory changes.
 - **Internet** page: WAN stability, first-hop loss, DNS, bufferbloat, traceroutes, speed history.
-- **Topology** page: wired/wireless tree with link speeds.
+- **Topology** page: wired/wireless tree with link speeds, switches, powerline links and their rates (see [topology](12-topology-history-enrichment.md)).
 
 ## Example from this network
 
