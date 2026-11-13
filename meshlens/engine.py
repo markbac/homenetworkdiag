@@ -10,7 +10,7 @@ import time
 from typing import Any
 
 from . import config as config_mod
-from . import oui, secrets
+from . import analysis, oui, secrets
 from .collectors.asus.collector import AsusCollector
 from .store import db, jsonl
 
@@ -28,6 +28,8 @@ class Engine:
         self._thread: threading.Thread | None = None
         self.paused = False
         self.started = time.time()
+        self._analysis: dict[float, tuple[float, dict[str, Any]]] = {}
+        self._lock = threading.Lock()
 
     # ------------------------------------------------------------ control
 
@@ -46,6 +48,38 @@ class Engine:
         self._force_full = full
         self._wake.set()
 
+    def apply_config(self, cfg: config_mod.Config) -> None:
+        """Use a new configuration (already validated and saved)."""
+        with self._lock:
+            self.cfg = cfg
+            self.asus.cfg = cfg.router
+            self._analysis.clear()
+
+    def analysis(self, hours: float = 24) -> dict[str, Any]:
+        """Issues and health for the last ``hours`` (cached for 30 s)."""
+        now = time.time()
+        with self._lock:
+            hit = self._analysis.get(hours)
+            if hit and now - hit[0] < 30:
+                return hit[1]
+        since = now - hours * 3600
+        res = analysis.analyse(db.events(since, limit=200000), db.station_samples_since(since), db.latest_radio(),
+                               db.units(), db.devices(), db.latest_settings(), self.cfg.analysis, now)
+        with self._lock:
+            self._analysis[hours] = (now, res)
+        return res
+
+    def rollup(self, now: float | None = None) -> None:
+        """Daily summaries for today and yesterday (kept 12 months, D-25)."""
+        import datetime as dt
+        now = now or time.time()
+        today = dt.date.fromtimestamp(now)
+        for d in (today - dt.timedelta(days=1), today):
+            start = time.mktime(d.timetuple())
+            end = time.mktime((d + dt.timedelta(days=1)).timetuple())
+            db.rollup_day(d.isoformat(), start, end,
+                          lambda k, r, dc, rssi: analysis.device_score(k, r, dc, rssi))
+
     def router_password(self) -> str | None:
         r = self.cfg.router
         return secrets.get_secret("asus", secrets.router_ident(r.username, r.host, r.port))
@@ -59,6 +93,11 @@ class Engine:
             "router": {"host": r.host, "port": r.port, "username": r.username,
                        "password_set": secrets.has_secret("asus", secrets.router_ident(r.username, r.host, r.port))},
             "asus": self.asus.status,
+            "integrations": {s: {"enabled": getattr(self.cfg, s).enabled,
+                                 "secret_set": bool(getattr(self.cfg, s).url) and
+                                 secrets.has_secret(secrets.SERVICE_KINDS[s], secrets.service_ident(s, self.cfg)),
+                                 "collector": "not yet implemented"}
+                             for s in ("pihole", "homeassistant", "unifi")},
         }
 
     # ------------------------------------------------------------ loop
@@ -76,6 +115,10 @@ class Engine:
                 except Exception:  # A collector bug must not stop the engine.
                     log.exception("ASUS poll crashed")
                 if time.time() - last_prune > 3600:
+                    try:
+                        self.rollup()
+                    except Exception:
+                        log.exception("daily rollup failed")
                     db.prune(self.cfg.retention.raw_days, self.cfg.retention.summary_days)
                     jsonl.prune(self.root, self.cfg.retention.raw_days)
                     last_prune = time.time()

@@ -12,9 +12,11 @@
   <div class="brand"><span class="logo">&#9678;</span> MeshLens</div>
   <nav id="tabs" hidden>
     <button data-tab="overview" class="on">Overview</button>
+    <button data-tab="analysis">Analysis</button>
     <button data-tab="devices">Devices</button>
     <button data-tab="events">Wi-Fi events</button>
     <button data-tab="settings">Settings</button>
+    <button data-tab="help">Help</button>
   </nav>
   <div class="right"><span id="poll" class="muted"></span><button id="logout" class="link" hidden>Log out</button></div>
 </header>
@@ -28,16 +30,46 @@
       <button type="submit">Continue</button>
       <p id="login-error" class="error"></p>
     </form>
+    <p class="muted small">Forgotten it? On the PC running MeshLens, delete <span class="mono">web_auth.json</span> in
+      <span class="mono">%LOCALAPPDATA%\MeshLens</span> and restart MeshLens; it will ask you to create a new one.
+      Router and other passwords are not affected.</p>
   </section>
 
   <section id="overview" class="tab" hidden>
+    <div class="card health-card">
+      <div class="score" id="net-score">–</div>
+      <div><h3>Network health <button class="help" data-help="health">?</button></h3>
+        <p id="net-summary" class="muted"></p><div id="net-counts"></div></div>
+    </div>
+    <div class="card"><h3>Needs attention <span class="muted small">(last 24 h)</span> <button class="help" data-help="issues">?</button>
+      <a href="#" class="small" data-goto="analysis">all issues →</a></h3><div id="top-issues"></div></div>
     <div class="grid">
-      <div class="card"><h3>Mesh units</h3><table id="units-table"></table></div>
-      <div class="card"><h3>Radio health</h3><table id="radio-table"></table>
+      <div class="card"><h3>Mesh units <button class="help" data-help="units">?</button></h3><table id="units-table"></table></div>
+      <div class="card"><h3>Radio health <button class="help" data-help="radio-health">?</button></h3><table id="radio-table"></table>
         <p class="muted small">Transmit failures and receive errors since the unit started; high values mean interference or weak links.</p></div>
     </div>
-    <div class="card"><h3>Findings <span class="muted small">(last 24 h)</span></h3><div id="findings"></div></div>
-    <div class="card"><h3>Least stable devices <span class="muted small">(last 24 h)</span></h3><table id="stability-table"></table></div>
+    <div class="card"><h3>Least stable devices <span class="muted small">(last 24 h)</span> <button class="help" data-help="stability">?</button></h3>
+      <table id="stability-table"></table></div>
+  </section>
+
+  <section id="analysis" class="tab" hidden>
+    <div class="card">
+      <div class="toolbar">
+        <label>Period <select id="an-hours"><option value="1">last hour</option><option value="24" selected>last 24 h</option><option value="168">last 7 days</option><option value="720">last 30 days</option></select></label>
+        <label>Show <select id="an-sev"><option value="">all</option><option value="high,medium" selected>problems (high + medium)</option><option value="high">high only</option><option value="low,info">low and info</option></select></label>
+        <span id="an-count" class="muted"></span>
+        <button class="help" data-help="issues">?</button>
+      </div>
+      <div id="an-issues"></div>
+    </div>
+    <div class="grid">
+      <div class="card"><h3>Mesh unit health <button class="help" data-help="health">?</button></h3><table id="an-units"></table></div>
+      <div class="card"><h3>Week on week <button class="help" data-help="trends">?</button></h3><table id="an-compare"></table>
+        <p class="muted small">Daily averages for the last 7 days against the 7 days before. Use it to see whether a change helped.</p></div>
+    </div>
+    <div class="card"><h3>Trend, last 30 days <button class="help" data-help="trends">?</button></h3>
+      <canvas id="trend" class="trend"></canvas><div id="trend-legend" class="legend"></div></div>
+    <div class="card"><h3>Device health (poorest first) <button class="help" data-help="health">?</button></h3><table id="an-devices" class="clickable"></table></div>
   </section>
 
   <section id="devices" class="tab" hidden>
@@ -45,7 +77,7 @@
       <div class="toolbar"><input id="dev-search" type="search" placeholder="Search name, IP, MAC, vendor">
         <label><input id="dev-online" type="checkbox" checked> Connected now</label>
         <label><input id="dev-watched" type="checkbox"> Watched only</label>
-        <span id="dev-count" class="muted"></span></div>
+        <span id="dev-count" class="muted"></span> <button class="help" data-help="devices">?</button></div>
       <table id="devices-table" class="clickable"></table>
     </div>
   </section>
@@ -60,27 +92,21 @@
           <option value="connect,disconnect">Connects / disconnects</option>
         </select>
         <select id="ev-hours"><option value="1">1 h</option><option value="24" selected>24 h</option><option value="168">7 days</option></select>
+        <button class="help" data-help="events">?</button>
       </div>
       <table id="events-table"></table>
     </div>
   </section>
 
   <section id="settings" class="tab" hidden>
-    <div class="card narrow">
-      <h3>ASUS router (read-only access)</h3>
-      <form id="router-form">
-        <label>Router address <input name="host" required></label>
-        <label>SSH port <input name="port" type="number" min="1" max="65535" required></label>
-        <label>Username <input name="username" required autocomplete="off"></label>
-        <label>Password <span id="pw-state" class="pill"></span>
-          <input name="password" type="password" autocomplete="new-password" placeholder="leave blank to keep"></label>
-        <label class="inline"><input name="clear_password" type="checkbox"> Clear stored password</label>
-        <p class="muted small">Stored in the Windows Credential Manager, never shown again. MeshLens only runs read-only commands.</p>
-        <button type="submit">Save and collect now</button> <span id="router-msg" class="muted"></span>
-      </form>
+    <div class="settings-layout">
+      <nav id="set-nav" class="subnav"></nav>
+      <div id="set-body"></div>
     </div>
-    <div class="card narrow"><h3>Collector status</h3><pre id="status-pre" class="small"></pre>
-      <button id="collect">Collect now</button></div>
+  </section>
+
+  <section id="help" class="tab" hidden>
+    <div class="card help-body" id="help-body"><p class="muted">Loading help…</p></div>
   </section>
 </main>
 

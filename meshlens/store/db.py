@@ -75,6 +75,7 @@ CREATE TABLE IF NOT EXISTS unit_settings (
 CREATE TABLE IF NOT EXISTS daily_device_summary (
   day TEXT, mac TEXT, kicks INTEGER, roams INTEGER, connects INTEGER, disconnects INTEGER,
   min_rssi INTEGER, max_rssi INTEGER,
+  avg_rssi REAL, avg_tx_rate REAL, samples INTEGER, score INTEGER,
   PRIMARY KEY (day, mac)
 );
 """
@@ -259,8 +260,10 @@ def events(since: float, mac: str | None = None, kinds: list[str] | None = None,
     q += " ORDER BY ts DESC LIMIT ?"
     args.append(limit)
     out = _rows(conn().execute(q, args))
+    from ..collectors.asus.parsers import band_of_iface
     for e in out:
         e["detail"] = json.loads(e["detail"] or "{}")
+        e["band"] = band_of_iface(e["iface"]) if e.get("iface") else None
     return out
 
 
@@ -272,3 +275,57 @@ def latest_radio() -> list[dict[str, Any]]:
     for r in out:
         r["data"] = json.loads(r["data"] or "{}")
     return out
+
+
+def station_samples_since(since: float) -> list[dict[str, Any]]:
+    """Compact per-sample rows for analysis."""
+    return _rows(conn().execute(
+        "SELECT ts, unit, mac, band, rssi, tx_rate FROM station_samples WHERE ts >= ? ORDER BY ts", (since,)))
+
+
+def latest_settings() -> dict[str, dict[str, str]]:
+    """Most recent settings snapshot per unit."""
+    rows = conn().execute(
+        """SELECT s.unit, s.data FROM unit_settings s
+           JOIN (SELECT unit, MAX(ts) AS ts FROM unit_settings GROUP BY unit) m ON m.unit = s.unit AND m.ts = s.ts""")
+    return {r["unit"]: json.loads(r["data"] or "{}") for r in rows}
+
+
+def rollup_day(day: str, start: float, end: float, score_fn) -> int:
+    """Fill daily_device_summary for one local day (D-25: kept for a year)."""
+    c = conn()
+    ev = {r["mac"]: dict(r) for r in c.execute(
+        """SELECT mac, SUM(kind = 'kick') AS kicks, SUM(kind = 'roam_candidate') AS roams,
+                  SUM(kind = 'connect') AS connects, SUM(kind = 'disconnect') AS disconnects
+           FROM events WHERE ts >= ? AND ts < ? AND mac IS NOT NULL GROUP BY mac""", (start, end))}
+    st = {r["mac"]: dict(r) for r in c.execute(
+        """SELECT mac, MIN(rssi) AS min_rssi, MAX(rssi) AS max_rssi, AVG(rssi) AS avg_rssi,
+                  AVG(tx_rate) AS avg_tx_rate, COUNT(*) AS samples
+           FROM station_samples WHERE ts >= ? AND ts < ? GROUP BY mac""", (start, end))}
+    rows = []
+    for mac in set(ev) | set(st):
+        e, s = ev.get(mac, {}), st.get(mac, {})
+        r = {"day": day, "mac": mac, "kicks": e.get("kicks") or 0, "roams": e.get("roams") or 0,
+             "connects": e.get("connects") or 0, "disconnects": e.get("disconnects") or 0,
+             "min_rssi": s.get("min_rssi"), "max_rssi": s.get("max_rssi"),
+             "avg_rssi": round(s["avg_rssi"], 1) if s.get("avg_rssi") is not None else None,
+             "avg_tx_rate": round(s["avg_tx_rate"], 1) if s.get("avg_tx_rate") is not None else None,
+             "samples": s.get("samples") or 0}
+        r["score"] = score_fn(r["kicks"], r["roams"], r["disconnects"], r["avg_rssi"])
+        rows.append(r)
+    with _write_lock:
+        c.execute("DELETE FROM daily_device_summary WHERE day = ?", (day,))
+        if rows:
+            keys = list(rows[0])
+            c.executemany(f"INSERT INTO daily_device_summary({', '.join(keys)}) VALUES ({', '.join('?' for _ in keys)})",
+                          [tuple(r[k] for k in keys) for r in rows])
+        c.commit()
+    return len(rows)
+
+
+def daily_summary(since_day: str, mac: str | None = None) -> list[dict[str, Any]]:
+    q, args = "SELECT * FROM daily_device_summary WHERE day >= ?", [since_day]
+    if mac:
+        q += " AND mac = ?"
+        args.append(mac.lower())
+    return _rows(conn().execute(q + " ORDER BY day", args))

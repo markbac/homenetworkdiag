@@ -69,3 +69,7 @@ class Auth:
     def end(self, token: str | None) -> None:
         if token:
             self.sessions.pop(token, None)
+
+    def end_all(self) -> None:
+        """Log out every session (after a password change)."""
+        self.sessions.clear()

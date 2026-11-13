@@ -1,13 +1,16 @@
 """Configuration: paths, defaults and the user's settings file.
 
 Settings live in ``%LOCALAPPDATA%\\MeshLens\\config.yaml`` (or ``$MESHLENS_HOME``).
-Secrets are never stored here: see :mod:`meshlens.secrets`.
+Secrets (passwords, tokens) are never stored here: see :mod:`meshlens.secrets`.
+Everything in this file is editable from the web UI (Settings).
 """
 from __future__ import annotations
 
+import ipaddress
 import os
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields, is_dataclass
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -37,8 +40,17 @@ class RouterConfig:
 
 
 @dataclass
+class NetworkConfig:
+    """The home network (D-11). Used by discovery and to tell local from internet addresses."""
+
+    subnets: list[str] = field(default_factory=lambda: ["10.0.10.0/23"])
+    exclude: list[str] = field(default_factory=list)       # addresses or ranges never to scan
+    dns_servers: list[str] = field(default_factory=list)   # empty = use the router's
+
+
+@dataclass
 class WebConfig:
-    """Web control interface (D-05, D-18): LAN access with a login."""
+    """Web control interface (D-05, D-18): LAN access with a login. Changes need a restart."""
 
     bind: str = "0.0.0.0"
     port: int = 8787
@@ -53,11 +65,84 @@ class RetentionConfig:
 
 
 @dataclass
+class PiholeConfig:
+    """Pi-hole plug-in (D-21). Secret: the app password (v6) or API token (v5)."""
+
+    enabled: bool = False
+    url: str = ""                   # e.g. http://10.0.10.53
+    version: str = "6"              # "6" or "5"
+    verify_tls: bool = True
+
+
+@dataclass
+class HomeAssistantConfig:
+    """Home Assistant plug-in (D-21). Secret: a long-lived access token."""
+
+    enabled: bool = False
+    url: str = ""                   # e.g. http://homeassistant.local:8123
+    verify_tls: bool = True
+
+
+@dataclass
+class UnifiConfig:
+    """UniFi Network controller, read-only View Only admin (D-27). Secret: its password."""
+
+    enabled: bool = False
+    url: str = "https://127.0.0.1:8443"
+    username: str = "meshlens"
+    site: str = "default"
+    verify_tls: bool = False        # the local controller uses a self-signed certificate
+
+
+DEVICE_KINDS = ("unifi_switch", "tplink_easy_smart", "devolo", "managed_switch", "access_point", "other")
+
+
+@dataclass
+class DeviceLogin:
+    """Login for a switch, powerline adapter or other network device. Secret: its password."""
+
+    name: str = ""
+    kind: str = "other"
+    host: str = ""
+    username: str = ""
+    notes: str = ""
+
+
+@dataclass
+class AnalysisConfig:
+    """Thresholds for issue detection (DIA-04). Defaults suit a typical home mesh."""
+
+    kick_loop_count: int = 3
+    kick_loop_minutes: int = 60
+    roam_storm_count: int = 4
+    roam_storm_seconds: int = 120
+    flapping_count: int = 6
+    flapping_minutes: int = 60
+    weak_rssi_dbm: int = -72          # typical signal below this = edge of coverage
+    sticky_margin_db: int = 8         # another unit this much stronger but the device stays
+    slow_rate_mbps_24: float = 20.0   # typical link rate below this = slow link
+    slow_rate_mbps_5: float = 80.0
+    radio_tx_fail_warn: float = 5.0
+    radio_tx_fail_bad: float = 10.0
+    radio_rx_err_warn: float = 5.0
+    radio_rx_err_bad: float = 10.0
+    radio_temp_warn: float = 80.0
+    mass_drop_devices: int = 4        # this many devices dropping off one unit within a minute
+    crowded_clients_24: int = 20      # clients on one 2.4 GHz radio
+    watched_offline_hours: float = 2.0
+
+
+@dataclass
 class Config:
     router: RouterConfig = field(default_factory=RouterConfig)
+    network: NetworkConfig = field(default_factory=NetworkConfig)
     web: WebConfig = field(default_factory=WebConfig)
     retention: RetentionConfig = field(default_factory=RetentionConfig)
-    subnet: str = "10.0.10.0/23"
+    pihole: PiholeConfig = field(default_factory=PiholeConfig)
+    homeassistant: HomeAssistantConfig = field(default_factory=HomeAssistantConfig)
+    unifi: UnifiConfig = field(default_factory=UnifiConfig)
+    devices: list[DeviceLogin] = field(default_factory=list)
+    analysis: AnalysisConfig = field(default_factory=AnalysisConfig)
 
     @property
     def path(self) -> Path:
@@ -66,18 +151,91 @@ class Config:
     def save(self) -> None:
         self.path.write_text(yaml.safe_dump(asdict(self), sort_keys=False), encoding="utf-8")
 
+    def as_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+SECTIONS = {f.name: f.default_factory for f in fields(Config) if f.name != "devices"}  # type: ignore[misc]
+
+
+def _coerce(cls: type, values: dict[str, Any]) -> Any:
+    """Build a section dataclass from a dict, ignoring unknown keys and converting types.
+
+    Raises ValueError for values that cannot be converted, so the web UI can refuse them.
+    """
+    obj = cls()
+    for f in fields(cls):
+        if f.name not in values or values[f.name] is None:
+            continue
+        cur, v = getattr(obj, f.name), values[f.name]
+        if isinstance(cur, bool):
+            v = v if isinstance(v, bool) else str(v).lower() in ("1", "true", "yes", "on")
+        elif isinstance(cur, int):
+            v = int(v)
+        elif isinstance(cur, float):
+            v = float(v)
+        elif isinstance(cur, list):
+            if isinstance(v, str):
+                v = [x.strip() for x in v.replace("\n", ",").split(",") if x.strip()]
+            v = [str(x).strip() for x in v]
+        else:
+            v = str(v).strip()
+        setattr(obj, f.name, v)
+    return obj
+
+
+def validate(cfg: Config) -> list[str]:
+    """Return problems with a configuration (empty when it is fine)."""
+    errs = []
+    for s in cfg.network.subnets:
+        try:
+            ipaddress.ip_network(s, strict=False)
+        except ValueError:
+            errs.append(f"'{s}' is not a subnet (use e.g. 10.0.10.0/23)")
+    for s in cfg.network.exclude + cfg.network.dns_servers:
+        try:
+            ipaddress.ip_network(s, strict=False)
+        except ValueError:
+            errs.append(f"'{s}' is not an address or range")
+    if not cfg.network.subnets:
+        errs.append("at least one subnet is needed")
+    for name, port in (("router", cfg.router.port), ("web", cfg.web.port)):
+        if not 1 <= port <= 65535:
+            errs.append(f"{name} port must be 1-65535")
+    if cfg.router.poll_seconds < 15:
+        errs.append("router poll interval must be at least 15 seconds")
+    if cfg.retention.raw_days < 1 or cfg.retention.summary_days < cfg.retention.raw_days:
+        errs.append("keep summaries at least as long as raw data")
+    for svc in (cfg.pihole, cfg.homeassistant, cfg.unifi):
+        if svc.enabled and not svc.url.startswith(("http://", "https://")):
+            errs.append(f"{type(svc).__name__.replace('Config', '')} address must start with http:// or https://")
+    for d in cfg.devices:
+        if not d.host:
+            errs.append(f"device '{d.name or '?'}' needs an address")
+        if d.kind not in DEVICE_KINDS:
+            errs.append(f"device '{d.name or d.host}': unknown kind '{d.kind}'")
+    return errs
+
+
+def from_dict(raw: dict[str, Any]) -> Config:
+    cfg = Config()
+    for name, factory in SECTIONS.items():
+        cls = type(factory())
+        if is_dataclass(cls) and isinstance(raw.get(name), dict):
+            setattr(cfg, name, _coerce(cls, raw[name]))
+    cfg.devices = [_coerce(DeviceLogin, d) for d in raw.get("devices") or [] if isinstance(d, dict)]
+    # Settings files written before NetworkConfig existed had a single top-level subnet.
+    if "network" not in raw and raw.get("subnet"):
+        cfg.network.subnets = [raw["subnet"]]
+    return cfg
+
 
 def load() -> Config:
     """Load config.yaml, filling in defaults for anything missing."""
     cfg = Config()
     p = cfg.path
     if p.exists():
-        raw = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
-        for section, cls in (("router", RouterConfig), ("web", WebConfig), ("retention", RetentionConfig)):
-            values = raw.get(section) or {}
-            known = {k: v for k, v in values.items() if k in cls.__dataclass_fields__}
-            setattr(cfg, section, cls(**known))
-        cfg.subnet = raw.get("subnet", cfg.subnet)
+        cfg = from_dict(yaml.safe_load(p.read_text(encoding="utf-8")) or {})
     else:
         cfg.save()
     return cfg
