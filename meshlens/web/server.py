@@ -7,6 +7,7 @@ Secrets are accepted (router password) but never returned.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from pathlib import Path
@@ -14,7 +15,8 @@ from typing import Any
 
 from aiohttp import web
 
-from .. import journeys, secrets
+from .. import config as config_mod
+from .. import integrations, journeys, secrets
 from ..engine import Engine
 from ..store import db
 from .auth import Auth
@@ -50,7 +52,21 @@ def build_app(engine: Engine, auth: Auth) -> web.Application:
     r.add_get("/api/findings", findings)
     r.add_get("/api/radios", radios)
     r.add_post("/api/collect", collect)
-    r.add_post("/api/settings/router", router_settings)
+    r.add_post("/api/auth/password", auth_password)
+    r.add_get("/api/settings", settings_get)
+    r.add_post("/api/settings/devices", settings_devices)
+    r.add_post("/api/settings/test/{section}", settings_test)
+    r.add_post("/api/settings/{section}", settings_section)
+    r.add_get("/api/analysis", analysis_get)
+    r.add_get("/api/trends", trends)
+    r.add_get("/api/topology", topology_get)
+    r.add_get("/api/monitor/live", monitor_live)
+    r.add_get("/api/monitor/history", monitor_history)
+    r.add_post("/api/speedtest", speedtest_run)
+    r.add_get("/api/speedtests", speedtests_get)
+    r.add_get("/api/powerline", powerline_get)
+    r.add_post("/api/discovery/run", discovery_run)
+    r.add_get("/api/ports", ports_get)
     return app
 
 
@@ -115,6 +131,26 @@ async def auth_login(request: web.Request) -> web.Response:
     return _login_response(request, {"ok": True})
 
 
+async def auth_password(request: web.Request) -> web.Response:
+    """Change the dashboard password (needs the current one); logs out every other session."""
+    auth: Auth = request.app[AUTH]
+    if not auth.valid(request.cookies.get(COOKIE)):
+        return web.json_response({"error": "login required"}, status=401)
+    body = await request.json()
+    client = _client(request)
+    if auth.locked(client):
+        return web.json_response({"error": "too many attempts, wait 5 minutes"}, status=429)
+    if not auth.check_password(body.get("current") or ""):
+        auth.failed(client)
+        return web.json_response({"error": "current password is wrong"}, status=403)
+    new = body.get("new") or ""
+    if len(new) < 10:
+        return web.json_response({"error": "use at least 10 characters"}, status=400)
+    auth.set_password(new)
+    auth.end_all()
+    return _login_response(request, {"ok": True})
+
+
 async def auth_logout(request: web.Request) -> web.Response:
     request.app[AUTH].end(request.cookies.get(COOKIE))
     resp = web.json_response({"ok": True})
@@ -162,6 +198,14 @@ async def device(request: web.Request) -> web.Response:
     st = journeys.stability(evs)
     d["stability"] = _stab_json(st[0]) if st else None
     d["findings"] = [f for f in journeys.findings(evs)]
+    a = await asyncio.to_thread(request.app[ENGINE].analysis, 24)
+    d["health"] = a["devices"].get(mac)
+    d["issues"] = [i for i in a["issues"] if i["subject"] == mac or mac in (i.get("devices") or [])]
+    d["daily"] = db.daily_summary(_day(-30), mac)
+    d["ports"] = db.open_ports(mac)
+    d["inventory"] = db.inventory_events(time.time() - 30 * 86400, mac)[:50]
+    d["names"] = json.loads(d.get("names") or "{}")
+    d["services"] = json.loads(d.get("services") or "[]")
     return web.json_response(d)
 
 
@@ -204,30 +248,226 @@ async def collect(request: web.Request) -> web.Response:
     return web.json_response({"ok": True})
 
 
-async def router_settings(request: web.Request) -> web.Response:
-    engine: Engine = request.app[ENGINE]
-    body = await request.json()
-    r = engine.cfg.router
-    old_ident = secrets.router_ident(r.username, r.host, r.port)
+# ---------------------------------------------------------------- analysis
+
+def _day(offset: int = 0) -> str:
+    import datetime as dt
+    return (dt.date.today() + dt.timedelta(days=offset)).isoformat()
+
+
+async def analysis_get(request: web.Request) -> web.Response:
     try:
-        if "host" in body:
-            r.host = str(body["host"]).strip()
-        if "port" in body:
-            r.port = int(body["port"])
-        if "username" in body:
-            r.username = str(body["username"]).strip()
-    except (TypeError, ValueError):
-        return web.json_response({"error": "invalid value"}, status=400)
-    engine.cfg.save()
-    new_ident = secrets.router_ident(r.username, r.host, r.port)
-    if body.get("clear_password"):
-        secrets.clear_secret("asus", new_ident)
-    elif body.get("password"):
-        secrets.set_secret("asus", new_ident, body["password"])
-    elif new_ident != old_ident and secrets.has_secret("asus", old_ident):
-        secrets.set_secret("asus", new_ident, secrets.get_secret("asus", old_ident) or "")
-    engine.collect_now(full=True)
-    return web.json_response({"ok": True, "password_set": secrets.has_secret("asus", new_ident)})
+        hours = max(1.0, min(float(request.query.get("hours", 24)), 24 * 31))
+    except ValueError:
+        hours = 24.0
+    return web.json_response(await asyncio.to_thread(request.app[ENGINE].analysis, hours))
+
+
+async def trends(request: web.Request) -> web.Response:
+    from .. import analysis
+    try:
+        days = max(7, min(int(request.query.get("days", 30)), 366))
+    except ValueError:
+        days = 30
+    rows = db.daily_summary(_day(-(days - 1)))
+    cmp_rows = db.daily_summary(_day(-13))
+    return web.json_response({"days": analysis.trend(rows), "compare": analysis.compare_periods(cmp_rows, 7, _day())})
+
+
+# ---------------------------------------------------------------- topology, monitors, tests, discovery
+
+async def topology_get(request: web.Request) -> web.Response:
+    return web.json_response(await asyncio.to_thread(request.app[ENGINE].topology))
+
+
+async def monitor_live(request: web.Request) -> web.Response:
+    return web.json_response(request.app[ENGINE].monitor.live())
+
+
+async def monitor_history(request: web.Request) -> web.Response:
+    since = _since(request)
+    rows = db.ping_minutes(since, request.query.get("target"))
+    by: dict[str, dict[str, Any]] = {}
+    for r in rows:
+        t = by.setdefault(r["target"], {"target": r["target"], "kind": r["kind"], "label": r["label"], "rows": []})
+        t["rows"].append([r["ts"], r["avg_ms"], r["max_ms"], r["jitter_ms"], r["lost"], r["sent"]])
+    return web.json_response(list(by.values()))
+
+
+async def speedtest_run(request: web.Request) -> web.Response:
+    engine: Engine = request.app[ENGINE]
+    res = await asyncio.to_thread(engine.run_speedtest, "manual")
+    return web.json_response(res, status=409 if res.get("error") == "a speed test is already running" else 200)
+
+
+async def speedtests_get(request: web.Request) -> web.Response:
+    try:
+        days = max(1, min(int(request.query.get("days", 30)), 366))
+    except ValueError:
+        days = 30
+    return web.json_response(db.speed_tests(time.time() - days * 86400))
+
+
+async def powerline_get(request: web.Request) -> web.Response:
+    from ..collectors.devolo import links
+    adapters = db.plc_adapters()
+    rates = db.plc_latest_rates()
+    hist = db.plc_rate_history(time.time() - 7 * 86400)
+    return web.json_response({"adapters": adapters, "links": links(adapters, rates), "history": hist,
+                              "status": request.app[ENGINE].devolo.status})
+
+
+async def discovery_run(request: web.Request) -> web.Response:
+    body = await request.json()
+    what = body.get("what")
+    if what not in ("sweep", "services", "ports"):
+        return web.json_response({"error": "what must be sweep, services or ports"}, status=400)
+    mac = (body.get("mac") or "").lower() or None
+    if mac and not db.device(mac):
+        return web.json_response({"error": "unknown device"}, status=404)
+    request.app[ENGINE].discovery.request(what, mac)
+    return web.json_response({"ok": True})
+
+
+async def ports_get(request: web.Request) -> web.Response:
+    return web.json_response(db.open_ports())
+
+
+# ---------------------------------------------------------------- settings
+
+SECRET_SECTIONS = ("router", "pihole", "homeassistant", "unifi")
+INFRA_VENDORS = ("ubiquiti", "tp-link", "tp link", "devolo", "netgear", "cisco", "zyxel", "d-link", "mikrotik",
+                 "aruba", "hewlett", "linksys", "draytek")
+
+
+def _settings_payload(engine: Engine) -> dict[str, Any]:
+    cfg = engine.cfg
+    out = cfg.as_dict()
+    out["secret_set"] = {s: secrets.has_secret(secrets.SERVICE_KINDS[s], secrets.service_ident(s, cfg))
+                         for s in SECRET_SECTIONS if s == "router" or getattr(cfg, s).url}
+    for d in out["devices"]:
+        d["ident"] = secrets.device_ident(d["host"], d["username"])
+        d["password_set"] = bool(d["host"]) and secrets.has_secret("device", d["ident"])
+    out["device_kinds"] = list(config_mod.DEVICE_KINDS)
+    known = {d["host"] for d in out["devices"]}
+    out["suggested_devices"] = [
+        {"name": d.get("user_name") or d.get("name") or d["mac"], "host": d["ip"], "vendor": d["vendor"], "mac": d["mac"]}
+        for d in db.devices()
+        if d.get("ip") and d["ip"] not in known and d.get("vendor")
+        and any(v in d["vendor"].lower() for v in INFRA_VENDORS) and (d.get("wired") or "devolo" in d["vendor"].lower())]
+    out["config_file"] = str(cfg.path)
+    return out
+
+
+async def settings_get(request: web.Request) -> web.Response:
+    return web.json_response(_settings_payload(request.app[ENGINE]))
+
+
+def _apply(engine: Engine, new_cfg: config_mod.Config) -> web.Response | None:
+    errs = config_mod.validate(new_cfg)
+    if errs:
+        return web.json_response({"error": "; ".join(errs)}, status=400)
+    new_cfg.save()
+    engine.apply_config(new_cfg)
+    return None
+
+
+async def settings_section(request: web.Request) -> web.Response:
+    """Save one settings section. Secrets (password/token) go to the Credential Manager, never to the file."""
+    engine: Engine = request.app[ENGINE]
+    section = request.match_info["section"]
+    if section not in config_mod.SECTIONS:
+        return web.json_response({"error": "unknown section"}, status=404)
+    body = await request.json()
+    if not isinstance(body, dict):
+        return web.json_response({"error": "object required"}, status=400)
+    secret = body.pop("secret", None) or body.pop("password", None)
+    clear = bool(body.pop("clear_secret", None) or body.pop("clear_password", None))
+    old_cfg = engine.cfg
+    old_ident = secrets.service_ident(section, old_cfg) if section in SECRET_SECTIONS else None
+    raw = old_cfg.as_dict()
+    raw[section] = {**raw[section], **body}
+    try:
+        new_cfg = config_mod.from_dict(raw)
+    except (TypeError, ValueError) as e:
+        return web.json_response({"error": f"invalid value: {e}"}, status=400)
+    err = _apply(engine, new_cfg)
+    if err:
+        return err
+    if section in SECRET_SECTIONS:
+        kind, ident = secrets.SERVICE_KINDS[section], secrets.service_ident(section, new_cfg)
+        if clear:
+            secrets.clear_secret(kind, ident)
+        elif secret:
+            secrets.set_secret(kind, ident, str(secret))
+        elif (section == "router" and ident != old_ident and new_cfg.router.host == old_cfg.router.host
+              and secrets.has_secret(kind, old_ident)):
+            # Same router, new port or username: keep the password. A new address needs it entered again.
+            secrets.set_secret(kind, ident, secrets.get_secret(kind, old_ident) or "")
+    if section == "router":
+        engine.collect_now(full=True)
+    return web.json_response(_settings_payload(engine))
+
+
+async def settings_devices(request: web.Request) -> web.Response:
+    """Replace the list of switch / powerline / other device logins."""
+    engine: Engine = request.app[ENGINE]
+    items = (await request.json()).get("devices")
+    if not isinstance(items, list) or not all(isinstance(d, dict) for d in items):
+        return web.json_response({"error": "devices list required"}, status=400)
+    live = [d for d in items if not d.get("removed")]
+    raw = engine.cfg.as_dict()
+    raw["devices"] = [{k: v for k, v in d.items() if k in ("name", "kind", "host", "username", "notes")} for d in live]
+    try:
+        new_cfg = config_mod.from_dict(raw)
+    except (TypeError, ValueError) as e:
+        return web.json_response({"error": f"invalid value: {e}"}, status=400)
+    err = _apply(engine, new_cfg)
+    if err:
+        return err
+    keep = set()
+    for d, item in zip(new_cfg.devices, live):
+        ident = secrets.device_ident(d.host, d.username)
+        keep.add(ident)
+        orig = item.get("orig_ident")
+        if item.get("clear_password"):
+            secrets.clear_secret("device", ident)
+        elif item.get("password"):
+            secrets.set_secret("device", ident, str(item["password"]))
+        elif orig and orig != ident and orig.split("@")[-1] == d.host.lower() and secrets.has_secret("device", orig):
+            secrets.set_secret("device", ident, secrets.get_secret("device", orig) or "")
+    for item in items:  # Removed or renamed entries: drop passwords nothing uses any more.
+        orig = item.get("orig_ident")
+        if orig and orig not in keep:
+            secrets.clear_secret("device", orig)
+    return web.json_response(_settings_payload(engine))
+
+
+async def settings_test(request: web.Request) -> web.Response:
+    """Read-only connection test with the stored (or just typed, unsaved) secret."""
+    engine: Engine = request.app[ENGINE]
+    section = request.match_info["section"]
+    if section not in ("pihole", "homeassistant", "unifi"):
+        return web.json_response({"error": "nothing to test for this section"}, status=404)
+    cfg = engine.cfg
+    svc = getattr(cfg, section)
+    if not svc.url:
+        return web.json_response({"ok": False, "detail": "Enter and save the address first."})
+    body = await request.json()
+    secret = (body or {}).get("secret") or secrets.get_secret(secrets.SERVICE_KINDS[section],
+                                                              secrets.service_ident(section, cfg))
+    if not secret:
+        return web.json_response({"ok": False, "detail": "No password or token stored yet."})
+    try:
+        if section == "pihole":
+            res = await integrations.test_pihole(svc.url, svc.version, secret, svc.verify_tls)
+        elif section == "homeassistant":
+            res = await integrations.test_homeassistant(svc.url, secret, svc.verify_tls)
+        else:
+            res = await integrations.test_unifi(svc.url, svc.username, secret, svc.site, svc.verify_tls)
+    except Exception as e:  # network errors, bad certificates, non-JSON answers
+        res = {"ok": False, "detail": f"Could not connect: {type(e).__name__}: {e}"}
+    return web.json_response(res)
 
 
 # ---------------------------------------------------------------- running

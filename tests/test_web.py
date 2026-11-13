@@ -20,6 +20,19 @@ class FakeEngine:
     def collect_now(self, full=True):
         self.collected += 1
 
+    def apply_config(self, cfg):
+        self.cfg = cfg
+
+    def analysis(self, hours=24):
+        return _analyse(self, hours)
+
+
+def _analyse(engine, hours):
+    from meshlens import analysis
+    since = time.time() - hours * 3600
+    return analysis.analyse(db.events(since, limit=100000), db.station_samples_since(since), db.latest_radio(),
+                            db.units(), db.devices(), db.latest_settings(), engine.cfg.analysis)
+
 
 def run(coro):
     return asyncio.run(coro)
@@ -75,6 +88,79 @@ def test_router_password_never_returned(tmp_home, monkeypatch):
             await c.post("/api/auth/login", json={"password": "a-long-password"})
             r = await c.post("/api/settings/router", json={"password": "router-secret"})
             body = await r.text()
-            assert r.status == 200 and "router-secret" not in body and '"password_set": true' in body
+            assert r.status == 200 and "router-secret" not in body and '"router": true' in body
     run(scenario())
     assert "router-secret" in store.values()
+
+
+def _fake_keyring(monkeypatch):
+    store = {}
+    monkeypatch.setattr("meshlens.secrets.keyring.set_password", lambda s, k, v: store.__setitem__(k, v))
+    monkeypatch.setattr("meshlens.secrets.keyring.get_password", lambda s, k: store.get(k))
+
+    def delete(s, k):
+        store.pop(k, None)
+    monkeypatch.setattr("meshlens.secrets.keyring.delete_password", delete)
+    return store
+
+
+def test_settings_sections_secrets_and_devices(tmp_home, monkeypatch):
+    store = _fake_keyring(monkeypatch)
+    engine = FakeEngine()
+    db.upsert_device("02:bb:00:00:00:09", time.time(), ip="10.0.10.195", vendor="TP-LINK TECHNOLOGIES", wired=1)
+
+    async def scenario():
+        auth = Auth(tmp_home / "web_auth.json")
+        auth.set_password("a-long-password")
+        async with TestClient(TestServer(build_app(engine, auth))) as c:
+            await c.post("/api/auth/login", json={"password": "a-long-password"})
+            s = await (await c.get("/api/settings")).json()
+            assert s["network"]["subnets"] == ["10.0.10.0/23"] and s["suggested_devices"][0]["host"] == "10.0.10.195"
+            # Invalid values are refused and nothing is saved.
+            r = await c.post("/api/settings/network", json={"subnets": "10.0.10.0/23, rubbish"})
+            assert r.status == 400 and "rubbish" in (await r.json())["error"]
+            r = await c.post("/api/settings/network", json={"subnets": "10.0.10.0/23\n192.168.50.0/24"})
+            assert (await r.json())["network"]["subnets"] == ["10.0.10.0/23", "192.168.50.0/24"]
+            # Pi-hole token stored in the credential store, never in the file or the response.
+            r = await c.post("/api/settings/pihole", json={"enabled": True, "url": "http://10.0.10.53", "secret": "tok-123"})
+            body = await r.text()
+            assert "tok-123" not in body and '"pihole": true' in body
+            assert "tok-123" not in (tmp_home / "config.yaml").read_text()
+            assert store["pihole:http://10.0.10.53"] == "tok-123"
+            assert (await c.post("/api/settings/nonsense", json={})).status == 404
+            # Device logins: add, keep password across a rename of username, remove.
+            r = await c.post("/api/settings/devices", json={"devices": [
+                {"name": "Office switch", "kind": "tplink_easy_smart", "host": "10.0.10.195", "username": "admin",
+                 "password": "sw-pass"}]})
+            d = (await r.json())["devices"][0]
+            assert d["password_set"] and "sw-pass" not in await r.text() and d["ident"] == "admin@10.0.10.195"
+            r = await c.post("/api/settings/devices", json={"devices": [
+                {"name": "Office switch", "kind": "tplink_easy_smart", "host": "10.0.10.195", "username": "root",
+                 "orig_ident": "admin@10.0.10.195"}]})
+            assert (await r.json())["devices"][0]["password_set"] and "device:admin@10.0.10.195" not in store
+            r = await c.post("/api/settings/devices", json={"devices": [{"orig_ident": "root@10.0.10.195", "removed": True}]})
+            assert (await r.json())["devices"] == [] and not any(k.startswith("device:") for k in store)
+            # Analysis thresholds are editable and used.
+            r = await c.post("/api/settings/analysis", json={"kick_loop_count": "2"})
+            assert (await r.json())["analysis"]["kick_loop_count"] == 2 and engine.cfg.analysis.kick_loop_count == 2
+            a = await (await c.get("/api/analysis?hours=24")).json()
+            assert {"issues", "devices", "units", "network"} <= set(a)
+            t = await (await c.get("/api/trends?days=30")).json()
+            assert t["compare"]["days"] == 7
+    run(scenario())
+
+
+def test_change_dashboard_password(tmp_home):
+    async def scenario():
+        auth = Auth(tmp_home / "web_auth.json")
+        auth.set_password("a-long-password")
+        async with TestClient(TestServer(build_app(FakeEngine(), auth))) as c:
+            assert (await c.post("/api/auth/password", json={"current": "x", "new": "another-long-one"})).status == 401
+            await c.post("/api/auth/login", json={"password": "a-long-password"})
+            r = await c.post("/api/auth/password", json={"current": "wrong", "new": "another-long-one"})
+            assert r.status == 403
+            assert (await c.post("/api/auth/password", json={"current": "a-long-password", "new": "short"})).status == 400
+            r = await c.post("/api/auth/password", json={"current": "a-long-password", "new": "another-long-one"})
+            assert r.status == 200 and (await c.get("/api/status")).status == 200   # this browser stays logged in
+        assert auth.check_password("another-long-one") and not auth.check_password("a-long-password")
+    run(scenario())

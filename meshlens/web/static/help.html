@@ -1,0 +1,304 @@
+<h2 id="getting-started">Getting started</h2>
+<ol>
+  <li id="install"><b>Install.</b> Run <code>MeshLens-x.y.z-setup.exe</code> from the project's GitHub Releases page. It installs to
+    Program Files, can start MeshLens when you sign in, and can allow the dashboard through the Windows firewall on private
+    (home) networks only. MeshLens then runs in the system tray: right-click the icon for the menu. The icon is green when
+    all is well, amber or red when there are issues.</li>
+  <li><b>Dashboard password.</b> Created the first time you open MeshLens. Change it under Settings → Dashboard login.</li>
+  <li><b>Router.</b> Settings → ASUS router: the address, SSH port and username are filled in. Type the router's password once.
+    MeshLens keeps it in the Windows Credential Manager and only runs read-only commands.</li>
+  <li><b>Wait a few minutes.</b> The router is read every minute (every 15 minutes for settings and device names). Issues and
+    health scores appear after a few polls; trends after two days.</li>
+  <li><b>Name your devices.</b> Open a device (Devices tab) and fill in its name, owner and room. Tick <i>Watch</i> for the ones
+    that matter: they also get their own ping monitor.</li>
+  <li><b>Optional services.</b> Pi-hole, Home Assistant, UniFi and switch logins can be stored and tested now. The collectors
+    that use them are still to come.</li>
+</ol>
+
+<h2 id="health">Health scores</h2>
+<p>Each score runs from 0 to 100: <span class="good">80+ good</span>, <span class="warn">60–79 fair</span>, <span class="bad">below 60 poor</span>.</p>
+<dl>
+  <dt>Device</dt><dd>Starts at 100. Points come off for being kicked (10 each), roam attempts (2 each), disconnects (4 each), a typical signal weaker
+    than -65 dBm (2 per dB) and a slow link (10). Wired devices have no Wi-Fi score.</dd>
+  <dt>Mesh unit</dt><dd>Starts at 100. Points come off for radio errors, for many devices dropping off it at once, and for how many of its devices are poor.
+    A unit MeshLens cannot reach scores 0. A unit that is not a managed node has no score.</dd>
+  <dt>Network</dt><dd>40% from the average unit score and 60% from the average device score, minus 5 for each high-severity issue (25 at most).</dd>
+</dl>
+
+<h2 id="issues">Issues: what they mean</h2>
+<p>Every issue has three parts. <b>Seen</b> is the evidence MeshLens found. <b>Why</b> is the most likely cause. <b>Try</b> lists fixes, simplest first.
+  Severity: <span class="sev high">High</span> hurts people now, <span class="sev medium">Medium</span> is worth fixing,
+  <span class="sev low">Low</span> is minor, <span class="sev info">Info</span> is just for you to know. You can change the thresholds under
+  Settings → Analysis thresholds.</p>
+
+<h3 id="issue-kick_loop">Kicked off Wi-Fi repeatedly (kick loop)</h3>
+<p>ASUS's <i>Roaming assistant</i> disconnects a device when its signal falls below a threshold (often -70 dBm). The idea is that it then joins a
+  closer unit. If no closer unit is any better, it rejoins the same one and is kicked again. Each kick costs a few seconds offline, which feels like lag
+  spikes or game disconnects. This is the most common cause of "the Wi-Fi is glitchy" on a mesh.</p>
+<p>Fixes: improve that device's signal (move it, move a unit, use 5 GHz at short range, or a cable or powerline adapter). Or lower the threshold to
+  about -75 dBm in the router (Wireless → Professional → Roaming assistant) so it only kicks when the signal is really poor.</p>
+<p><b>USB Wi-Fi adapters</b> (ALFA, TP-Link and others) are often the worst affected. A short USB extension cable moves the adapter away from the PC
+  case and from USB 3 noise. The maker's latest driver helps too. In Device Manager → the adapter → Advanced, set <i>Roaming aggressiveness</i> to
+  low and turn off power saving.</p>
+
+<h3 id="issue-roam_storm">Bounced between units (roam storm)</h3>
+<p>The device sits where two units look equally good, or equally bad. The mesh keeps trying to move it, and each attempt can stall traffic briefly.
+  Move the device or one unit so that one unit is clearly stronger.</p>
+
+<h3 id="issue-sticky_client">Sticks to a weaker unit</h3>
+<p>The router found a unit at least 8 dB stronger, but the device stayed where it was. Devices decide for themselves when to roam, and some ignore the
+  mesh's suggestions. Turn Wi-Fi off and on after moving rooms, update the driver, or on Windows raise <i>Roaming aggressiveness</i> one step.</p>
+
+<h3 id="issue-flapping">Keeps disconnecting (flapping)</h3>
+<p>Many disconnects in a short time. If its signal is good, the device itself is leaving: usually power saving, a driver bug, or the device sleeping.
+  If its signal is weak, treat it as a coverage problem.</p>
+
+<h3 id="issue-weak_signal">Weak signal</h3>
+<p>Signal strength is in dBm, and closer to 0 is stronger: -50 is excellent, -60 good, -70 usable, -80 poor. Below about -70 dBm the link slows down
+  and retries a lot. Every wall, floor, mirror, radiator and fish tank in between makes it weaker.</p>
+
+<h3 id="issue-slow_link">Slow link</h3>
+<p>The <i>link rate</i> is the speed the radio negotiated, not your internet speed. It drops with a weak signal or an old Wi-Fi standard. Idle phones
+  and tablets also report low rates to save power, so check again while the device is in use.</p>
+
+<h3 id="issue-radio_errors">Radio errors (failed transmissions)</h3>
+<p>Each radio counts frames it had to resend and frames that arrived corrupted. These are counted since the unit last restarted. Above about 10% means
+  real interference or struggling devices. 2.4 GHz is the usual culprit, because it is shared with neighbours, microwaves, baby monitors, Bluetooth
+  and USB 3 noise. Use 20 MHz width and channel 1, 6 or 11, and move devices that can use 5 GHz onto it.</p>
+
+<h3 id="issue-radio_hot">Running hot</h3>
+<p>Give the unit space and airflow. Units in cupboards or in direct sun throttle and become unstable.</p>
+
+<h3 id="issue-unit_unreachable">Cannot read a unit</h3>
+<p>MeshLens reads each node over SSH at the address the router lists for it. "Not in the router's mesh list" means the router reports clients on that
+  unit but doesn't list it as a managed AiMesh node. Its clients still appear through the router. Otherwise the unit is off, its backhaul is down, or
+  SSH has not reached it yet (rebooting the node after enabling SSH helps).</p>
+
+<h3 id="issue-mass_drop">Many devices dropped at once</h3>
+<p>When several devices leave one unit within a minute, the cause is the unit, not the devices. It may be a radio restart, a lost backhaul, a power
+  blip, or a burst of interference. If it repeats, check firmware, the power supply and the backhaul (a cable backhaul rules that out).</p>
+
+<h3 id="issue-crowded_radio">Crowded 2.4 GHz radio</h3>
+<p>All devices on a radio share its airtime. Many slow smart-home devices leave less for everyone else. Move dual-band devices to 5 GHz.</p>
+
+<h3 id="issue-vendor_pattern">One maker's devices unstable together</h3>
+<p>When most devices from one maker misbehave, suspect their Wi-Fi chip or driver rather than where they are. Update drivers or firmware and turn off
+  power saving.</p>
+
+<h3 id="issue-aggressive_roaming">Aggressive roaming threshold</h3>
+<p>A Roaming assistant threshold above -70 dBm kicks devices whose signal is still usable. About -70 to -75 dBm suits most homes.</p>
+
+<h3 id="issue-wps_on">WPS on</h3><p>WPS is a known weak point and rarely needed. Turn it off unless you use it.</p>
+<h3 id="issue-remote_admin">Router admin reachable from the internet</h3><p>Turn off web access from WAN, or limit it to known addresses.</p>
+<h3 id="issue-dmz">Device in the DMZ</h3><p>All incoming internet connections go to that device. Use specific port forwards instead.</p>
+<h3 id="issue-upnp_on">UPnP on</h3><p>Devices can open ports on the router by themselves. This suits consoles and video calls, but it is a risk if a device is compromised.</p>
+<h3 id="issue-igmp_snooping_off">IGMP snooping off</h3><p>Multicast traffic (casting, IPTV, Sonos, smart-home discovery) then goes to every device. On Wi-Fi that uses
+  airtime at the slowest rate. If you use IPTV or cast a lot, try turning it on and check that casting still works.</p>
+<h3 id="issue-watched_offline">Watched device not seen</h3><p>A device you marked as watched has been off the network longer than the limit in Analysis thresholds.</p>
+<h3 id="issue-new_device">New device</h3><p>A device joined for the first time. Phones with private (randomised) addresses can look new when they change address.
+  Name the ones you know.</p>
+
+<h3 id="issue-powerline_slow">Slow powerline link</h3>
+<p>devolo adapters report the radio (PHY) rate between each pair; usable throughput is roughly half. Below about 50 Mbit/s a
+  link struggles with video calls plus anything else; below 20 it is barely usable. Powerline runs over the house wiring, so
+  it is slowed by distance, different circuits, extension leads and surge protectors, and by electrical noise (phone and
+  laptop chargers, LED drivers, fridges, washing machines). Plug adapters straight into wall sockets and try other sockets.
+  A link that is fast one way and very slow the other (for example 182 and 7 Mbit/s) usually means noise near one adapter.</p>
+
+<h3 id="issue-local_latency">Lag between this PC and the router</h3>
+<p>Pings that never leave the house are slow or lost, so the problem is in the home network, not the internet. If the MeshLens
+  PC itself is on Wi-Fi, its own link is included; a cable to the router makes every other measurement more trustworthy.</p>
+
+<h3 id="issue-isp_problem">Internet drops or delays packets</h3>
+<p>Pings to internet targets lose packets or spike while pings to the router stay clean at the same time. That points at the
+  broadband line or the ISP. Note the times (the Tests tab keeps a month) and check they don't line up with heavy use at home
+  (see bufferbloat). If they don't, they are good evidence for the ISP.</p>
+
+<h3 id="issue-node_loss">Pings to a mesh unit are lost</h3><p>The unit or its backhaul is struggling. Check its backhaul on the Topology tab.</p>
+<h3 id="issue-device_loss">A watched device misses pings</h3><p>Often power saving (phones, consoles in rest mode). If it happens while the
+  device is in use, line it up with its Wi-Fi journey.</p>
+
+<h3 id="issue-bufferbloat">Bufferbloat</h3>
+<p>Latency while the line is full, compared with idle. When someone uploads (cloud backup, photo sync) or downloads, packets
+  queue in the router or modem and games and calls lag even though "speed" looks fine. Grades: A+ under 5 ms extra, A under 30,
+  B under 60, C under 200, D under 400, F above. The fix is the router's QoS: on ASUS, Adaptive QoS → QoS → enable, with
+  the bandwidth set to about 90% of your measured speeds.</p>
+
+<h3 id="issue-speed_low">Slower than your plan</h3><p>Set your plan's speeds under Settings → Monitors and speed tests. A test from a PC on
+  Wi-Fi measures the Wi-Fi too; test on a cable before calling the ISP.</p>
+<h3 id="issue-speedtest_failed">Speed test failed</h3><p>The test server could not be reached, or the connection dropped during the test.</p>
+
+<h3 id="issue-risky_port">A service worth checking</h3>
+<p>The port scan found a service that is a common way in on gadgets with default settings (Telnet, FTP, open camera streams,
+  Android debugging, databases without passwords). It is fine where you expect it and it has a password; otherwise turn it
+  off. MeshLens only scans inside your home network.</p>
+<h3 id="issue-new_open_port">New open port</h3><p>A device started offering a service it didn't before: an update, a setting or new software.</p>
+
+<h2 id="topology">Topology map</h2>
+<p>What is connected to what, built only from things MeshLens has actually measured:</p>
+<ul>
+  <li><b>Mesh units</b> sit under the unit they connect through. A Wi-Fi backhaul shows its band, signal and rate (the node's
+    backhaul radio appears as a client of its parent). A node bridged behind a powerline adapter shows as wired through it.</li>
+  <li><b>Powerline adapters</b> (⚡): the one wired to the router hangs off the router; the others hang off it with the measured
+    rates each way.</li>
+  <li><b>Devices</b> sit under the unit or adapter they use, with band and signal for Wi-Fi. Click any device for its details.
+    Devices offline for 15 minutes are left out.</li>
+</ul>
+<p>Switches without a management interface can't be seen directly; wired devices behind them appear under the unit or adapter
+  the switch is plugged into.</p>
+
+<h2 id="powerline">Powerline (devolo)</h2>
+<p>MeshLens reads the devolo Magic adapters through the same device API the devolo app and Home Assistant use, read-only, no
+  password needed. Any one adapter reports the whole powerline network: every adapter, which is wired to the router, the
+  devices behind each one, and the rate between every pair. Rates are kept for a month so slow spells show up.</p>
+
+<h2 id="monitors">Latency, jitter and loss</h2>
+<p>MeshLens pings the router, each mesh unit, internet targets (1.1.1.1 and 8.8.8.8) and your watched devices every 2
+  seconds, and keeps one summary per minute for a month.</p>
+<dl>
+  <dt>Latency</dt><dd>Round-trip time. On a cable the router is under 1 ms, on good Wi-Fi a few ms. Internet targets are usually 5 to 30 ms.</dd>
+  <dt>Worst (p95)</dt><dd>95% of pings were faster than this. It shows spikes that an average hides.</dd>
+  <dt>Jitter</dt><dd>How much latency changes from one ping to the next. Calls and games care about it more than latency itself;
+    under 10 ms is good.</dd>
+  <dt>Loss</dt><dd>Pings with no reply. Any steady loss to the router means a home problem; loss only to internet targets points at the ISP.</dd>
+</dl>
+<p>Comparing targets tells you where a problem is: router bad means home network; router fine but internet bad means the
+  line or the ISP. The optional <i>ISP first hop</i> target measures the first router on the ISP's side the way tracert does.
+  Routers answer those probes at low priority, so it is off by default and never used to raise issues on its own.</p>
+
+<h2 id="speedtest">Speed test and bufferbloat</h2>
+<p>Three phases, about 25 seconds: idle latency, then download with 4 parallel streams while pinging, then upload while pinging.
+  By default it uses Cloudflare's speed test servers: no account, and nothing about your network is sent, only the test traffic.
+  Each test moves a few hundred MB. Scheduled tests run every 6 hours (change it, or turn it off, under Settings → Monitors
+  and speed tests); the latency monitor pauses during a test. The result reflects the MeshLens PC's own connection too.</p>
+
+<h2 id="discovery">Discovery and ports</h2>
+<p>MeshLens finds devices on your subnets every 15 minutes with a paced ping sweep (at most 200 probes a second) and the PC's
+  ARP table, which also catches devices that ignore ping. It learns names from reverse DNS, NetBIOS (Windows PCs, NAS),
+  mDNS/Bonjour (Apple, Google Cast, printers, smart home) and UPnP (TVs, consoles, media servers), and shows which source each
+  name came from. Once a day it checks about 85 common ports on each device seen that day with ordinary connection attempts,
+  reads web page titles and banners, and records when ports open or close. <i>Type</i> is a best guess from maker, services and
+  ports; your own type always wins. Nothing outside your subnets is scanned.</p>
+
+<h2 id="units">Mesh units</h2>
+<p>The router and its AiMesh nodes. MeshLens finds the nodes from the router's own list and reads each one. <i>Chip</i> shows the radio family
+  (MediaTek on the BT8, Qualcomm on the BD4), because they report things differently.</p>
+
+<h2 id="radio-health">Radio health</h2>
+<p>For each radio: transmit failures (frames that needed resending), receive errors (corrupted frames), temperature and background noise. Noise closer
+  to 0 is worse; -95 dBm is quiet.</p>
+
+<h2 id="stability">Least stable devices</h2>
+<p>Devices ranked by kicks, roam attempts and disconnects in the last 24 hours. The weakest signal is the lowest the router reported in its roaming
+  checks.</p>
+
+<h2 id="trends">Trends and week on week</h2>
+<p>Every hour MeshLens writes a daily summary for each device: kicks, roam attempts, connects, disconnects, signal and a health score. Summaries are
+  kept for 12 months; detailed data for one month. <i>Week on week</i> compares the last 7 days with the 7 before. Use it after changing something,
+  such as moving a unit or lowering the roaming threshold, to see whether it helped.</p>
+
+<h2 id="devices">Devices</h2>
+<p>Everything the router knows about, wired and Wi-Fi. <i>Private MAC</i> means the device uses a randomised address (most phones do), so the maker
+  cannot be looked up. Makers are looked up in a list stored on this PC; nothing is sent to the internet.</p>
+
+<h2 id="events">Wi-Fi events</h2>
+<dl>
+  <dt>Connected / Disconnected</dt><dd>The device joined or left a unit.</dd>
+  <dt>Kicked (weak signal)</dt><dd>The roaming assistant disconnected it (see <a href="#" data-help="issue-kick_loop">kick loop</a>).</dd>
+  <dt>Roam attempt</dt><dd>The router checked whether another unit would be better, with both signal readings.</dd>
+  <dt>Moved to another unit</dt><dd>The device now shows on a different unit, so the old one cleared it.</dd>
+  <dt>Left (signal)</dt><dd>A Qualcomm (BD4) unit recorded the device leaving, with its last signal.</dd>
+  <dt>Association failed</dt><dd>The device tried to join and was refused, for example with a wrong password or too many devices.</dd>
+</dl>
+
+<h2 id="journey">Device journey</h2>
+<p>One device's day in order: where it joined, when it was kicked or moved, and how long it was offline in between. Click any device name to see it.</p>
+
+<h2 id="enrichment">Your notes</h2>
+<p>A name, owner, room, type and tags that you set. Your values always win over what MeshLens detects and are never overwritten.</p>
+
+<h2 id="set-dashboard">Settings: dashboard login</h2>
+<p>One password protects the dashboard for every phone and laptop on your network. After 5 wrong tries the dashboard waits 5 minutes. Changing the
+  password logs out every other browser. <b>Forgotten it?</b> On the MeshLens PC, delete <code>web_auth.json</code> in
+  <code>%LOCALAPPDATA%\MeshLens</code> and restart MeshLens.</p>
+
+<h2 id="set-network">Settings: network</h2>
+<p>The subnets that make up your home network (for example <code>10.0.10.0/23</code> covers 10.0.10.0 to 10.0.11.255). Device discovery and port checks (still to
+  come) only look inside these. Add addresses to the exclude list to leave them alone.</p>
+
+<h2 id="set-router">Settings: ASUS router</h2>
+<p>SSH must be enabled on the router (Administration → System → Enable SSH, LAN only). MeshLens logs in and runs only read-only commands. These are
+  listed in its source in <code>commands.py</code>, and it never changes a setting. The password is tied to the address, so moving the router to a
+  new address asks for it again.</p>
+
+<h2 id="set-pihole">Settings: Pi-hole</h2>
+<p>For Pi-hole v6, create an <b>app password</b> under Settings → Web interface / API (switch to Expert), and paste it here. For v5, use the API token from
+  Settings → API. <i>Test connection</i> logs in, reads today's query count and logs out.</p>
+
+<h2 id="set-homeassistant">Settings: Home Assistant</h2>
+<p>In Home Assistant, open your profile → Security → Long-lived access tokens → Create token. A user that is not an administrator is enough.</p>
+
+<h2 id="set-unifi">Settings: UniFi</h2>
+<p>Use a <b>local</b> admin with the <b>View Only</b> role and no two-factor login. In the UniFi Network app go to Settings → Admins &amp; Users and
+  add an admin restricted to local access. The local controller on this PC is <code>https://127.0.0.1:8443</code> and uses a self-signed certificate,
+  so leave certificate checking off for it.</p>
+
+<h2 id="set-devices">Settings: switches and other devices</h2>
+<p>Logins for TP-Link Easy Smart switches, devolo adapters and other network gear. MeshLens will use them read-only to show ports, link speeds and
+  errors, and which device is behind which port. <i>Found on your network</i> suggests wired devices whose maker usually makes network equipment.
+  Passwords are kept in the Windows Credential Manager, tied to the address and username. Removing a device also removes its password.</p>
+
+<h2 id="set-devolo">Settings: powerline</h2>
+<p>On by default. MeshLens finds devolo adapters among the devices it discovers; if it doesn't, enter one adapter's address
+  (any one is enough). Set when a link counts as slow.</p>
+
+<h2 id="set-discovery">Settings: discovery and ports</h2>
+<p>How often to look for devices, names and services, and to scan ports (0 = only when you press <i>Scan ports</i>). The
+  rate limit caps probes per second so cameras and smart plugs are never flooded. <i>Ports 1-1024</i> is more thorough but
+  takes longer per device.</p>
+
+<h2 id="set-monitor">Settings: monitors and speed tests</h2>
+<p>Ping interval and targets (add a game server's address to watch it), whether to include mesh units, watched devices and the
+  ISP's first router, how often to run speed tests, and your plan's speeds so MeshLens can tell you when you get less.</p>
+
+<h2 id="set-analysis">Settings: analysis thresholds</h2>
+<p>These control when an issue is raised. For example, <i>Kick loop: 3 kicks within 60 minutes</i>. Raise them if MeshLens reports too much, lower
+  them to catch problems sooner.</p>
+
+<h2 id="set-data">Settings: data kept</h2>
+<p>Detailed data (every poll, every event) is kept for 31 days by default, and daily summaries for 366 days. Everything stays on this PC in
+  <code>%LOCALAPPDATA%\MeshLens</code>.</p>
+
+<h2 id="set-web">Settings: web interface</h2>
+<p><code>0.0.0.0</code> lets phones and laptops on your network open the dashboard. <code>127.0.0.1</code> limits it to this PC. Windows may ask once to
+  allow MeshLens through the firewall; allow it for <i>private</i> networks only.</p>
+
+<h2 id="troubleshooting">Troubleshooting</h2>
+<dl>
+  <dt>"Authentication failed" for the router</dt><dd>The router password is missing or wrong. Enter it again under Settings → ASUS router.</dd>
+  <dt>"Connection refused" or a timeout</dt><dd>SSH is off on the router or on a different port. Check Administration → System on the router.</dd>
+  <dt>A node shows "not reachable"</dt><dd>See <a href="#" data-help="issue-unit_unreachable">Cannot read a unit</a>.</dd>
+  <dt>No issues and no scores</dt><dd>Wait for a few router polls. Settings → Status shows the last poll and any error.</dd>
+  <dt>Phones can't open the dashboard</dt><dd>Check Settings → Web interface listens on 0.0.0.0, and that the Windows firewall allows MeshLens on private networks.</dd>
+  <dt>Logs</dt><dd><code>%LOCALAPPDATA%\MeshLens\logs\meshlens.log</code>. Start with <code>--debug</code> for more detail.</dd>
+</dl>
+
+<h2 id="privacy">Privacy and safety</h2>
+<ul>
+  <li>Read-only everywhere: MeshLens never changes your router, switches or services.</li>
+  <li>Passwords and tokens are kept in the Windows Credential Manager. They are never written to files or logs, and never shown in the dashboard.</li>
+  <li>No device data leaves your network. Maker lookups use a list stored on this PC.</li>
+</ul>
+
+<h2 id="glossary">Glossary</h2>
+<dl>
+  <dt>dBm (signal)</dt><dd>Signal strength; closer to 0 is stronger. -50 excellent, -60 good, -70 usable, -80 poor.</dd>
+  <dt>2.4 / 5 / 6 GHz</dt><dd>The Wi-Fi bands. 2.4 GHz reaches furthest but is slow and crowded. 5 GHz is faster with shorter range. 6 GHz is fastest,
+    shortest range, and needs Wi-Fi 6E or 7 devices.</dd>
+  <dt>Roaming</dt><dd>A device moving from one mesh unit to another.</dd>
+  <dt>Roaming assistant</dt><dd>ASUS's feature that kicks devices below a signal threshold so they move to a closer unit.</dd>
+  <dt>Backhaul</dt><dd>The link between mesh units (wireless or cable).</dd>
+  <dt>Link rate</dt><dd>The speed the radio negotiated with the device, in Mbit/s.</dd>
+  <dt>Airtime</dt><dd>The share of time a radio is busy sending. Slow devices use more of it for the same data.</dd>
+  <dt>Private / randomised MAC</dt><dd>A made-up hardware address that phones use for privacy.</dd>
+</dl>

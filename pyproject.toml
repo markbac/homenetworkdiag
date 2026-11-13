@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "meshlens"
-version = "0.1.0"
+dynamic = ["version"]
 description = "MeshLens: home network diagnostics for Windows (ASUS AiMesh, ESP32 radio probes, LAN inventory)"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -15,13 +15,19 @@ dependencies = [
   "keyring>=24",
   "pystray>=0.19",
   "pillow>=10",
+  "devolo-plc-api>=1.4",
+  "zeroconf>=0.130",
 ]
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
+build = ["pyinstaller>=6.5"]
 
 [project.scripts]
 meshlens = "meshlens.__main__:main"
+
+[tool.setuptools.dynamic]
+version = {attr = "meshlens.__version__"}
 
 [tool.setuptools.packages.find]
 include = ["meshlens*"]

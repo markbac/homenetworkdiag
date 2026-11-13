@@ -36,3 +36,24 @@ def clear_secret(kind: str, ident: str) -> None:
 
 def router_ident(username: str, host: str, port: int) -> str:
     return f"{username}@{host}:{port}"
+
+
+# Where each configured service keeps its secret. The identity includes the address so a
+# secret is never sent to a different host after the address is changed.
+SERVICE_KINDS = {"router": "asus", "pihole": "pihole", "homeassistant": "hass", "unifi": "unifi"}
+
+
+def service_ident(section: str, cfg) -> str:
+    """Credential-manager identity for a config section (``cfg`` is the full Config)."""
+    if section == "router":
+        r = cfg.router
+        return router_ident(r.username, r.host, r.port)
+    if section == "unifi":
+        return f"{cfg.unifi.username}@{cfg.unifi.url.rstrip('/')}"
+    if section in ("pihole", "homeassistant"):
+        return getattr(cfg, section).url.rstrip("/")
+    raise KeyError(section)
+
+
+def device_ident(host: str, username: str) -> str:
+    return f"{username}@{host}".lower()
