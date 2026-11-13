@@ -18,8 +18,24 @@ LOCKOUT_SECONDS = 300
 class Auth:
     def __init__(self, path: Path):
         self.path = path
-        self.sessions: dict[str, float] = {}
+        self.sessions_path = path.with_name("web_sessions.json")
+        self.sessions: dict[str, float] = {}      # sha256(token) -> expiry; the tokens themselves are never stored
         self.failures: dict[str, list[float]] = {}
+        try:
+            now = time.time()
+            self.sessions = {k: v for k, v in json.loads(self.sessions_path.read_text()).items() if v > now}
+        except (OSError, ValueError):
+            pass
+
+    @staticmethod
+    def _h(token: str) -> str:
+        return hashlib.sha256(token.encode()).hexdigest()
+
+    def _save_sessions(self) -> None:
+        try:
+            self.sessions_path.write_text(json.dumps(self.sessions))
+        except OSError:
+            pass
 
     # ------------------------------------------------------------ password
 
@@ -54,22 +70,25 @@ class Auth:
 
     def new_session(self) -> str:
         token = pysecrets.token_urlsafe(32)
-        self.sessions[token] = time.time() + SESSION_SECONDS
+        self.sessions[self._h(token)] = time.time() + SESSION_SECONDS
+        self._save_sessions()
         return token
 
     def valid(self, token: str | None) -> bool:
         if not token:
             return False
-        exp = self.sessions.get(token)
+        exp = self.sessions.get(self._h(token))
         if exp is None or exp < time.time():
-            self.sessions.pop(token, None)
+            if self.sessions.pop(self._h(token), None) is not None:
+                self._save_sessions()
             return False
         return True
 
     def end(self, token: str | None) -> None:
-        if token:
-            self.sessions.pop(token, None)
+        if token and self.sessions.pop(self._h(token), None) is not None:
+            self._save_sessions()
 
     def end_all(self) -> None:
         """Log out every session (after a password change)."""
         self.sessions.clear()
+        self._save_sessions()

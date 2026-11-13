@@ -88,6 +88,7 @@ async function refreshBase() {
   const [units, devs, status] = await Promise.all([api("/api/units"), api("/api/devices"), api("/api/status")]);
   unitsByMac = Object.fromEntries(units.map((u) => [u.mac, u])); indexUnits(units);
   devicesByMac = Object.fromEntries(devs.map((d) => [d.mac, d]));
+  showUpdateBanner(status.update);
   const a = status.asus;
   $("#poll").textContent = a.error ? "Router: not connected (Settings → Status)" : a.last_poll ? `Router polled ${ago(a.last_poll)}` : "Waiting for first router poll";
   $("#poll").className = a.error ? "bad" : "muted";
@@ -358,6 +359,7 @@ const SECTIONS = [
     { k: "raw_days", label: "Detailed data (days)", type: "number" }, { k: "summary_days", label: "Daily summaries (days)", type: "number" }] },
   { id: "web", title: "Web interface", help: "set-web", note: "Changes take effect after MeshLens restarts (tray icon → Quit, then start it again).", fields: [
     { k: "bind", label: "Listen on", type: "text", hint: "0.0.0.0 = whole LAN, 127.0.0.1 = this PC only" }, { k: "port", label: "Port", type: "number" }] },
+  { id: "updates", title: "Updates", help: "updates", custom: renderUpdates },
   { id: "status", title: "Status", help: "troubleshooting", custom: renderStatus },
 ];
 let settingsData = null, currentSection = "dashboard";
@@ -470,6 +472,52 @@ function renderDeviceLogins(el) {
   };
 }
 
+// ---------------------------------------------------------------- updates
+function showUpdateBanner(u) {
+  const b = $("#update-banner");
+  if (!u || (!u.available && !u.state)) { b.hidden = true; return; }
+  b.hidden = false;
+  b.innerHTML = u.state ? `<b>Updating MeshLens:</b> ${esc(u.state)}${u.error ? ` · <span class="bad">${esc(u.error)}</span>` : ""}`
+    : `<b>MeshLens ${esc(u.latest)} is available</b> <span class="muted">(you have ${esc(u.current)})</span>
+       ${u.self_update ? '<button id="banner-install">Install update</button>' : '<span class="muted small">running from source: update with git pull</span>'}
+       <a href="#" data-goto="settings" data-set="updates" class="small">what's new</a>${u.error ? ` <span class="bad small">${esc(u.error)}</span>` : ""}`;
+  const btn = $("#banner-install");
+  if (btn) btn.onclick = () => installUpdate(btn);
+}
+
+async function installUpdate(btn) {
+  if (btn) btn.disabled = true;
+  try { await post("/api/update/install"); } catch (e) { alert(e.message); }
+  // Poll until the installer takes over; MeshLens restarts and the page reconnects.
+  const t = setInterval(async () => { try { const st = await api("/api/status"); showUpdateBanner(st.update); } catch (e) { /* restarting */ } }, 2000);
+  setTimeout(() => clearInterval(t), 180000);
+}
+
+async function renderUpdates(el) {
+  const st = await api("/api/status"), u = st.update, cfg = settingsData.updates;
+  el.innerHTML = `<div class="kv"><div>This version</div><div>${esc(u.current)}</div>
+      <div>Latest release</div><div>${u.latest ? esc(u.latest) + (u.available ? ' <span class="pill good">update available</span>' : ' <span class="muted">(up to date)</span>') : '<span class="muted">not checked yet</span>'}</div>
+      <div>Last checked</div><div>${esc(ago(u.checked))}${u.error ? ` · <span class="bad">${esc(u.error)}</span>` : ""}</div></div>
+    <p><button id="upd-check" class="secondary">Check now</button>
+      ${u.available && u.self_update ? '<button id="upd-install">Install update</button>' : ""}
+      ${u.available && !u.self_update ? '<span class="muted">This copy runs from source: update it with <code>git pull</code>.</span>' : ""}
+      ${u.url ? ` <a href="${esc(u.url)}" target="_blank" rel="noopener noreferrer">release page ↗</a>` : ""}</p>
+    ${u.notes ? `<h4>What's new in ${esc(u.latest)}</h4><pre class="notes">${esc(u.notes)}</pre>` : ""}
+    <form id="upd-form">
+      <label class="inline"><input type="checkbox" name="check_automatically" ${cfg.check_automatically ? "checked" : ""}> Check for updates automatically</label>
+      <label>Check every (hours) <input name="check_hours" type="number" value="${esc(cfg.check_hours)}"></label>
+      <label class="inline"><input type="checkbox" name="include_prereleases" ${cfg.include_prereleases ? "checked" : ""}> Include test (pre-release) versions</label>
+      <button type="submit">Save</button> <span id="upd-msg" class="muted"></span></form>
+    <p class="muted small">Updates come only from the project's GitHub releases and are checked against the release's published SHA-256
+      checksum before installing. Windows asks once for permission; MeshLens then closes, updates and starts again.
+      Your settings, history and passwords are kept.</p>`;
+  $("#upd-check").onclick = async () => { $("#upd-check").disabled = true; await post("/api/update/check"); renderUpdates(el); refreshBase(); };
+  if ($("#upd-install")) $("#upd-install").onclick = () => installUpdate($("#upd-install"));
+  $("#upd-form").onsubmit = async (e) => { e.preventDefault(); const f = e.target;
+    try { await post("/api/settings/updates", { check_automatically: f.check_automatically.checked, check_hours: Number(f.check_hours.value), include_prereleases: f.include_prereleases.checked });
+      settingsData = await api("/api/settings"); $("#upd-msg").textContent = "Saved"; } catch (err) { $("#upd-msg").textContent = err.message; } };
+}
+
 async function renderStatus(el) {
   const st = await api("/api/status");
   el.innerHTML = `<div class="kv"><div>Version</div><div>${esc(st.version)}</div><div>Running for</div><div>${esc(Math.round(st.uptime_s / 60))} min</div>
@@ -499,7 +547,7 @@ document.addEventListener("click", (e) => {
   const help = e.target.closest("[data-help]");
   if (help) { e.preventDefault(); $("#drawer").hidden = true; showTab("help", help.dataset.help); return; }
   const go = e.target.closest("[data-goto]");
-  if (go) { e.preventDefault(); showTab(go.dataset.goto); return; }
+  if (go) { e.preventDefault(); if (go.dataset.set) currentSection = go.dataset.set; showTab(go.dataset.goto); return; }
   const set = e.target.closest("[data-set]");
   if (set) { loadSettings(set.dataset.set); return; }
   const a = e.target.closest("[data-mac]");

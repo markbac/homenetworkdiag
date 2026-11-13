@@ -23,6 +23,15 @@ class FakeEngine:
     def apply_config(self, cfg):
         self.cfg = cfg
 
+    update_info = {"available": False, "current": "0.0.0", "self_update": False}
+
+    def check_update(self):
+        self.update_info = {"available": True, "current": "0.0.0", "latest": "9.9.9", "self_update": False}
+        return self.update_info
+
+    def install_update(self):
+        self.update_info["error"] = "this copy runs from source: update it with git pull"
+
     def analysis(self, hours=24):
         return _analyse(self, hours)
 
@@ -163,4 +172,20 @@ def test_change_dashboard_password(tmp_home):
             r = await c.post("/api/auth/password", json={"current": "a-long-password", "new": "another-long-one"})
             assert r.status == 200 and (await c.get("/api/status")).status == 200   # this browser stays logged in
         assert auth.check_password("another-long-one") and not auth.check_password("a-long-password")
+    run(scenario())
+
+
+
+def test_update_endpoints(tmp_home):
+    engine = FakeEngine()
+
+    async def scenario():
+        auth = Auth(tmp_home / "web_auth.json")
+        auth.set_password("a-long-password")
+        async with TestClient(TestServer(build_app(engine, auth))) as c:
+            await c.post("/api/auth/login", json={"password": "a-long-password"})
+            assert (await c.post("/api/update/install", json={})).status == 409      # nothing to install yet
+            info = await (await c.post("/api/update/check", json={})).json()
+            assert info["available"] and info["latest"] == "9.9.9"
+            assert (await c.post("/api/update/install", json={})).status == 200
     run(scenario())

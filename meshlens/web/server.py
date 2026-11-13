@@ -67,6 +67,8 @@ def build_app(engine: Engine, auth: Auth) -> web.Application:
     r.add_get("/api/powerline", powerline_get)
     r.add_post("/api/discovery/run", discovery_run)
     r.add_get("/api/ports", ports_get)
+    r.add_post("/api/update/check", update_check)
+    r.add_post("/api/update/install", update_install)
     return app
 
 
@@ -326,6 +328,19 @@ async def discovery_run(request: web.Request) -> web.Response:
     if mac and not db.device(mac):
         return web.json_response({"error": "unknown device"}, status=404)
     request.app[ENGINE].discovery.request(what, mac)
+    return web.json_response({"ok": True})
+
+
+async def update_check(request: web.Request) -> web.Response:
+    return web.json_response(await asyncio.to_thread(request.app[ENGINE].check_update))
+
+
+async def update_install(request: web.Request) -> web.Response:
+    engine: Engine = request.app[ENGINE]
+    if not engine.update_info.get("available"):
+        return web.json_response({"error": "no update available"}, status=409)
+    import threading
+    threading.Thread(target=engine.install_update, daemon=True).start()
     return web.json_response({"ok": True})
 
 

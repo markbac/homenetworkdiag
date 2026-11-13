@@ -273,6 +273,15 @@
 <p><code>0.0.0.0</code> lets phones and laptops on your network open the dashboard. <code>127.0.0.1</code> limits it to this PC. Windows may ask once to
   allow MeshLens through the firewall; allow it for <i>private</i> networks only.</p>
 
+<h2 id="updates">Updates</h2>
+<p>MeshLens checks the project's GitHub releases once a day (Settings → Updates; you can turn it off). When a newer version is out,
+  a banner appears on the dashboard and the tray menu shows <i>Install update</i>. Installing downloads the setup file from the
+  release, checks it against the release's published SHA-256 checksum, and runs it; Windows asks once for permission. MeshLens
+  closes, updates and starts again, usually within a minute, and the dashboard reconnects on its own. Settings, history and
+  passwords are kept, and the database is upgraded automatically. You can also always download the latest
+  <code>MeshLens-x.y.z-setup.exe</code> from the releases page and run it over the top of the installed version.</p>
+<p>The check only asks GitHub which release is the latest; nothing about your network is sent.</p>
+
 <h2 id="troubleshooting">Troubleshooting</h2>
 <dl>
   <dt>"Authentication failed" for the router</dt><dd>The router password is missing or wrong. Enter it again under Settings → ASUS router.</dd>

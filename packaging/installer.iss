@@ -24,7 +24,8 @@ WizardStyle=modern
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=admin
-CloseApplications=yes
+CloseApplications=force
+RestartApplications=no
 
 [Tasks]
 Name: "startup"; Description: "Start MeshLens when I sign in to Windows"; GroupDescription: "Options:"
@@ -48,7 +49,8 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 [Run]
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""MeshLens dashboard"" dir=in action=allow program=""{app}\MeshLens.exe"" protocol=TCP localport=8787 profile=private"; \
   Flags: runhidden; Tasks: firewall; StatusMsg: "Allowing the dashboard on private networks..."
-Filename: "{app}\MeshLens.exe"; Parameters: "--tray"; Description: "Start MeshLens now"; Flags: nowait postinstall skipifsilent runasoriginaluser
+Filename: "{app}\MeshLens.exe"; Parameters: "--tray"; Description: "Start MeshLens now"; Flags: nowait postinstall runasoriginaluser
+; Not skipped in silent mode: an in-app update runs the installer with /SILENT and MeshLens starts again afterwards.
 
 [UninstallRun]
 Filename: "{sys}\taskkill.exe"; Parameters: "/IM MeshLens.exe /F"; Flags: runhidden; RunOnceId: "StopMeshLens"
