@@ -6,6 +6,7 @@
 <title>MeshLens</title>
 <link rel="stylesheet" href="/static/style.css">
 <script src="/static/app.js" defer></script>
+<script src="/static/views.js" defer></script>
 </head>
 <body>
 <header>
@@ -13,6 +14,8 @@
   <nav id="tabs" hidden>
     <button data-tab="overview" class="on">Overview</button>
     <button data-tab="analysis">Analysis</button>
+    <button data-tab="topology">Topology</button>
+    <button data-tab="tests">Tests</button>
     <button data-tab="devices">Devices</button>
     <button data-tab="events">Wi-Fi events</button>
     <button data-tab="settings">Settings</button>
@@ -72,12 +75,50 @@
     <div class="card"><h3>Device health (poorest first) <button class="help" data-help="health">?</button></h3><table id="an-devices" class="clickable"></table></div>
   </section>
 
+  <section id="topology" class="tab" hidden>
+    <div class="card">
+      <div class="toolbar"><h3 style="margin:0">Network map <button class="help" data-help="topology">?</button></h3>
+        <label><input id="topo-devices" type="checkbox" checked> Show devices</label>
+        <label><input id="topo-weak" type="checkbox"> Only problem devices</label>
+        <span id="topo-meta" class="muted small"></span></div>
+      <div id="topo-tree" class="topo"></div>
+    </div>
+    <div class="card"><h3>Powerline (devolo) <button class="help" data-help="powerline">?</button></h3>
+      <div id="plc-body" class="muted">No powerline data yet.</div></div>
+  </section>
+
+  <section id="tests" class="tab" hidden>
+    <div class="card">
+      <div class="toolbar"><h3 style="margin:0">Latency, jitter and loss <button class="help" data-help="monitors">?</button></h3>
+        <span class="muted small">live, last 5 minutes · refreshes every 10 s</span></div>
+      <table id="mon-live"></table>
+    </div>
+    <div class="card">
+      <div class="toolbar"><h3 style="margin:0">History</h3>
+        <select id="mon-hours"><option value="1">1 h</option><option value="6">6 h</option><option value="24" selected>24 h</option><option value="168">7 days</option></select>
+        <select id="mon-target"></select></div>
+      <canvas id="mon-chart" class="trend"></canvas><div class="legend"><span><i style="background:var(--accent)"></i>average</span><span><i style="background:var(--warn)"></i>worst in the minute</span><span><i style="background:var(--bad)"></i>packet loss</span></div>
+    </div>
+    <div class="card">
+      <div class="toolbar"><h3 style="margin:0">Speed test and bufferbloat <button class="help" data-help="speedtest">?</button></h3>
+        <button id="speed-run">Run speed test</button> <span id="speed-msg" class="muted"></span></div>
+      <div id="speed-last"></div>
+      <canvas id="speed-chart" class="trend"></canvas><div class="legend"><span><i style="background:var(--accent)"></i>download</span><span><i style="background:var(--good)"></i>upload</span></div>
+      <table id="speed-table"></table>
+    </div>
+  </section>
+
   <section id="devices" class="tab" hidden>
     <div class="card">
       <div class="toolbar"><input id="dev-search" type="search" placeholder="Search name, IP, MAC, vendor">
         <label><input id="dev-online" type="checkbox" checked> Connected now</label>
         <label><input id="dev-watched" type="checkbox"> Watched only</label>
-        <span id="dev-count" class="muted"></span> <button class="help" data-help="devices">?</button></div>
+        <span id="dev-count" class="muted"></span> <button class="help" data-help="devices">?</button>
+        <span class="spacer"></span>
+        <button id="scan-sweep" class="secondary">Find devices now</button>
+        <button id="scan-services" class="secondary">Look up names and services</button>
+        <button id="scan-ports" class="secondary">Scan ports (all)</button>
+        <span id="scan-msg" class="muted small"></span></div>
       <table id="devices-table" class="clickable"></table>
     </div>
   </section>

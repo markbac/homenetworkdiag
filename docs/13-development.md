@@ -13,6 +13,19 @@ python -m venv .venv
 
 First start: open the web UI, create the dashboard password, then **Settings → ASUS router**: address, SSH port (1111) and username are pre-filled; enter the router password once (stored in the Windows Credential Manager).
 
+## Installer and releases
+
+```powershell
+powershell -ExecutionPolicy Bypass -File packaginguild.ps1            # dist\MeshLens\MeshLens.exe (+ installer if Inno Setup 6 is installed)
+```
+
+- `packaging/meshlens.spec` (PyInstaller, one folder, no console), `packaging/installer.iss` (Inno Setup: Program Files,
+  Start menu, optional start at sign-in, optional firewall rule for **private** networks only, uninstaller that keeps the data).
+- **Release:** bump `meshlens/__init__.py`, merge to `main`, then push a tag `vX.Y.Z`. `.github/workflows/release.yml` runs the
+  tests, builds the exe, smoke-tests that it serves the dashboard, builds `MeshLens-X.Y.Z-setup.exe` and a portable zip,
+  and publishes them as a GitHub release. Pull requests that touch packaging build the installer as a workflow artifact
+  (nothing published). `ci.yml` runs the tests on every pull request.
+
 Data lives in `%LOCALAPPDATA%\MeshLens` (`config.yaml`, `meshlens.db`, `raw\*.jsonl`, `logs\meshlens.log`, `oui\` vendor lists). Set `MESHLENS_HOME` to use another folder (e.g. a scratch instance for testing).
 
 ## Layout
@@ -28,6 +41,13 @@ Data lives in `%LOCALAPPDATA%\MeshLens` (`config.yaml`, `meshlens.db`, `raw\*.js
 | `meshlens/collectors/asus/collector.py` | Polls router + nodes, normalises, stores |
 | `meshlens/journeys.py` | Wi-Fi journeys, stability counts |
 | `meshlens/analysis.py` | **Issue rules** (evidence, cause, fixes, help link), health scores, trends, week-on-week |
+| `meshlens/collectors/devolo.py` | devolo Magic powerline: adapters, devices behind each, PHY rates (read-only device API) |
+| `meshlens/discovery/` | Ping/ARP sweep (mesh proxy-ARP aware), DNS/NetBIOS/mDNS/UPnP names and services, TCP port scan, device types |
+| `meshlens/net/icmp.py` | ICMP echo via the Windows IP Helper API (no admin), TTL-limited probes |
+| `meshlens/monitor.py` | Latency / jitter / loss monitor, one row per target per minute |
+| `meshlens/net/speedtest.py` | Speed test with bufferbloat grade (idle, loaded down, loaded up) |
+| `meshlens/topology.py` | Network map: units, backhaul, powerline, devices |
+| `meshlens/analysis_net.py` | Issue rules for powerline, latency, speed, bufferbloat, ports |
 | `meshlens/integrations.py` | Read-only connection tests for Pi-hole, Home Assistant, UniFi |
 | `meshlens/engine.py` | Background scheduler, retention |
 | `meshlens/web/` | aiohttp server, login, JSON API, static UI, `static/help.html` (in-app help) |
@@ -50,7 +70,13 @@ Data lives in `%LOCALAPPDATA%\MeshLens` (`config.yaml`, `meshlens.db`, `raw\*.js
 | Settings for everything: dashboard password, network/subnets, router, Pi-hole, Home Assistant, UniFi, switch/powerline logins, thresholds, retention, web | UI-06, D-21, D-27 | Done; secrets in Credential Manager; Pi-hole / HA / UniFi connection test |
 | In-app help: getting started, every issue, every setting, troubleshooting, glossary | UI | Done |
 | Storage, JSONL, retention | NFR-05, D-20, D-25 | Done |
-| Next | Pi-hole / HA / UniFi / switch / devolo collectors, LAN discovery and ports, ESP32 probes, speed and latency tests, topology map, reports | Not started |
+| devolo powerline collector | SW-04 | Done (adapters, bridged devices, pairwise rates, slow-link issue) |
+| LAN discovery: sweep, ARP (proxy-ARP aware), reverse DNS, NetBIOS, mDNS, SSDP/UPnP, classification | DEV-01, SVC-01/02/03/07/08 | Done |
+| Port scan, web titles, banners, risk labels, port history | PRT-01/03/04/05 | Done (TCP; UDP checks not yet) |
+| Topology map | TOP-01, MAP-01/02 | Done (tree view; per-port switch mapping needs the switch collectors) |
+| Latency / jitter / loss monitors, speed tests, bufferbloat | TST-01/02/03/05, ISP-05 | Done |
+| Tray status colour, start with Windows, installer, CI, release workflow | UI-06, NFR-01 | Done |
+| Next | Pi-hole / HA / UniFi / TP-Link switch collectors, ESP32 probes, reports, timeline, IPv6, rogue AP/DHCP checks | Not started |
 
 ## Rules for contributors
 

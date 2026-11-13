@@ -7,6 +7,7 @@ Secrets are accepted (router password) but never returned.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from pathlib import Path
@@ -58,6 +59,14 @@ def build_app(engine: Engine, auth: Auth) -> web.Application:
     r.add_post("/api/settings/{section}", settings_section)
     r.add_get("/api/analysis", analysis_get)
     r.add_get("/api/trends", trends)
+    r.add_get("/api/topology", topology_get)
+    r.add_get("/api/monitor/live", monitor_live)
+    r.add_get("/api/monitor/history", monitor_history)
+    r.add_post("/api/speedtest", speedtest_run)
+    r.add_get("/api/speedtests", speedtests_get)
+    r.add_get("/api/powerline", powerline_get)
+    r.add_post("/api/discovery/run", discovery_run)
+    r.add_get("/api/ports", ports_get)
     return app
 
 
@@ -193,6 +202,10 @@ async def device(request: web.Request) -> web.Response:
     d["health"] = a["devices"].get(mac)
     d["issues"] = [i for i in a["issues"] if i["subject"] == mac or mac in (i.get("devices") or [])]
     d["daily"] = db.daily_summary(_day(-30), mac)
+    d["ports"] = db.open_ports(mac)
+    d["inventory"] = db.inventory_events(time.time() - 30 * 86400, mac)[:50]
+    d["names"] = json.loads(d.get("names") or "{}")
+    d["services"] = json.loads(d.get("services") or "[]")
     return web.json_response(d)
 
 
@@ -259,6 +272,65 @@ async def trends(request: web.Request) -> web.Response:
     rows = db.daily_summary(_day(-(days - 1)))
     cmp_rows = db.daily_summary(_day(-13))
     return web.json_response({"days": analysis.trend(rows), "compare": analysis.compare_periods(cmp_rows, 7, _day())})
+
+
+# ---------------------------------------------------------------- topology, monitors, tests, discovery
+
+async def topology_get(request: web.Request) -> web.Response:
+    return web.json_response(await asyncio.to_thread(request.app[ENGINE].topology))
+
+
+async def monitor_live(request: web.Request) -> web.Response:
+    return web.json_response(request.app[ENGINE].monitor.live())
+
+
+async def monitor_history(request: web.Request) -> web.Response:
+    since = _since(request)
+    rows = db.ping_minutes(since, request.query.get("target"))
+    by: dict[str, dict[str, Any]] = {}
+    for r in rows:
+        t = by.setdefault(r["target"], {"target": r["target"], "kind": r["kind"], "label": r["label"], "rows": []})
+        t["rows"].append([r["ts"], r["avg_ms"], r["max_ms"], r["jitter_ms"], r["lost"], r["sent"]])
+    return web.json_response(list(by.values()))
+
+
+async def speedtest_run(request: web.Request) -> web.Response:
+    engine: Engine = request.app[ENGINE]
+    res = await asyncio.to_thread(engine.run_speedtest, "manual")
+    return web.json_response(res, status=409 if res.get("error") == "a speed test is already running" else 200)
+
+
+async def speedtests_get(request: web.Request) -> web.Response:
+    try:
+        days = max(1, min(int(request.query.get("days", 30)), 366))
+    except ValueError:
+        days = 30
+    return web.json_response(db.speed_tests(time.time() - days * 86400))
+
+
+async def powerline_get(request: web.Request) -> web.Response:
+    from ..collectors.devolo import links
+    adapters = db.plc_adapters()
+    rates = db.plc_latest_rates()
+    hist = db.plc_rate_history(time.time() - 7 * 86400)
+    return web.json_response({"adapters": adapters, "links": links(adapters, rates), "history": hist,
+                              "status": request.app[ENGINE].devolo.status})
+
+
+async def discovery_run(request: web.Request) -> web.Response:
+    body = await request.json()
+    what = body.get("what")
+    if what not in ("sweep", "services", "ports"):
+        return web.json_response({"error": "what must be sweep, services or ports"}, status=400)
+    mac = (body.get("mac") or "").lower() or None
+    if mac and not db.device(mac):
+        return web.json_response({"error": "unknown device"}, status=404)
+    request.app[ENGINE].discovery.request(what, mac)
+    return web.json_response({"ok": True})
+
+
+async def ports_get(request: web.Request) -> web.Response:
+    return web.json_response(db.open_ports())
 
 
 # ---------------------------------------------------------------- settings

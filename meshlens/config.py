@@ -94,6 +94,47 @@ class UnifiConfig:
     verify_tls: bool = False        # the local controller uses a self-signed certificate
 
 
+@dataclass
+class DevoloConfig:
+    """devolo Magic (G.hn) powerline via the devolo device API (SW-04). Any one adapter reports the whole network."""
+
+    enabled: bool = True
+    adapters: list[str] = field(default_factory=list)   # addresses to ask; empty = devolo devices seen on the LAN
+    poll_seconds: int = 300
+    slow_mbps: int = 50               # powerline link slower than this (either direction) is reported
+    bad_mbps: int = 20
+
+
+@dataclass
+class DiscoveryConfig:
+    """LAN discovery (DEV-01, SVC-01..03) and port scans (PRT-01..05). Paced so it never floods the network."""
+
+    enabled: bool = True
+    sweep_minutes: int = 15           # find devices: ping/ARP sweep, names
+    services_minutes: int = 60        # mDNS, SSDP, NetBIOS
+    port_scan_hours: int = 24         # top ports on every device (0 = only on demand)
+    port_set: str = "top100"          # top100 or top1000
+    max_rate: int = 200               # packets / connection attempts per second at most
+
+
+@dataclass
+class MonitorConfig:
+    """Ping, latency, jitter and loss monitors (TST-01, TST-05) and speed / bufferbloat tests (TST-02, TST-03)."""
+
+    enabled: bool = True
+    interval_seconds: float = 2.0
+    internet_targets: list[str] = field(default_factory=lambda: ["1.1.1.1", "8.8.8.8"])
+    extra_targets: list[str] = field(default_factory=list)   # anything else to watch, e.g. a games server
+    include_nodes: bool = True
+    include_isp_hop: bool = False      # first ISP router (tracert-style); routers answer at low priority, so noisy
+    include_watched: bool = True       # watched devices with an address
+    speedtest_hours: float = 6.0       # 0 = only on demand
+    speedtest_seconds: int = 10        # per direction
+    speedtest_server: str = "https://speed.cloudflare.com"
+    expected_down_mbps: float = 0.0    # your plan; 0 = unknown
+    expected_up_mbps: float = 0.0
+
+
 DEVICE_KINDS = ("unifi_switch", "tplink_easy_smart", "devolo", "managed_switch", "access_point", "other")
 
 
@@ -143,6 +184,9 @@ class Config:
     unifi: UnifiConfig = field(default_factory=UnifiConfig)
     devices: list[DeviceLogin] = field(default_factory=list)
     analysis: AnalysisConfig = field(default_factory=AnalysisConfig)
+    devolo: DevoloConfig = field(default_factory=DevoloConfig)
+    discovery: DiscoveryConfig = field(default_factory=DiscoveryConfig)
+    monitor: MonitorConfig = field(default_factory=MonitorConfig)
 
     @property
     def path(self) -> Path:
@@ -209,6 +253,19 @@ def validate(cfg: Config) -> list[str]:
     for svc in (cfg.pihole, cfg.homeassistant, cfg.unifi):
         if svc.enabled and not svc.url.startswith(("http://", "https://")):
             errs.append(f"{type(svc).__name__.replace('Config', '')} address must start with http:// or https://")
+    for s in cfg.devolo.adapters + cfg.monitor.extra_targets + cfg.monitor.internet_targets:
+        if not s or " " in s:
+            errs.append(f"'{s}' is not an address or host name")
+    if cfg.discovery.port_set not in ("top100", "top1000"):
+        errs.append("port set must be top100 or top1000")
+    if not 10 <= cfg.discovery.max_rate <= 2000:
+        errs.append("discovery rate must be 10-2000 per second")
+    if cfg.monitor.interval_seconds < 0.5:
+        errs.append("ping interval must be at least 0.5 seconds")
+    if not 3 <= cfg.monitor.speedtest_seconds <= 60:
+        errs.append("speed test length must be 3-60 seconds")
+    if cfg.monitor.speedtest_server and not cfg.monitor.speedtest_server.startswith("https://"):
+        errs.append("speed test server must start with https://")
     for d in cfg.devices:
         if not d.host:
             errs.append(f"device '{d.name or '?'}' needs an address")

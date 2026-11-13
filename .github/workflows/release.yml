@@ -1,0 +1,86 @@
+name: Release
+
+# Push a tag like v0.2.0 to build the Windows installer and publish a GitHub release.
+# Pull requests that touch packaging build the installer too (kept as a workflow artifact, nothing published).
+on:
+  push:
+    tags: ["v*.*.*"]
+  pull_request:
+    paths: ["packaging/**", ".github/workflows/release.yml", "pyproject.toml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Version
+        id: v
+        shell: pwsh
+        run: |
+          if ("${{ github.ref_type }}" -eq "tag") { $v = "${{ github.ref_name }}".TrimStart("v") }
+          else { $v = (Select-String -Path meshlens\__init__.py -Pattern '__version__ = "([^"]+)"').Matches[0].Groups[1].Value + "-dev.${{ github.run_number }}" }
+          "version=$v" >> $env:GITHUB_OUTPUT
+
+      - name: Install
+        run: python -m pip install -e ".[dev,build]"
+
+      - name: Tests
+        run: python -m pytest -q
+
+      - name: Build exe
+        shell: pwsh
+        run: |
+          python packaging\make_assets.py ${{ steps.v.outputs.version }}
+          python -m PyInstaller packaging\meshlens.spec --noconfirm --clean --distpath dist --workpath build
+
+      - name: Smoke test exe
+        shell: pwsh
+        run: |
+          $env:MESHLENS_HOME = "$env:RUNNER_TEMP\meshlens-smoke"
+          $p = Start-Process dist\MeshLens\MeshLens.exe -ArgumentList "--debug" -PassThru
+          $ok = $false
+          foreach ($i in 1..30) {
+            Start-Sleep 2
+            try { $r = Invoke-RestMethod http://127.0.0.1:8787/api/auth/state; if ($r.setup_needed) { $ok = $true; break } } catch {}
+          }
+          Stop-Process -Id $p.Id -Force
+          if (-not $ok) { Get-Content "$env:MESHLENS_HOME\logs\meshlens.log" -ErrorAction SilentlyContinue; throw "MeshLens.exe did not serve the dashboard" }
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          if (-not (Get-Command iscc -ErrorAction SilentlyContinue) -and -not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup --no-progress -y
+          }
+          $iscc = (Get-Command iscc -ErrorAction SilentlyContinue).Source
+          if (-not $iscc) { $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
+          & $iscc "/DAppVersion=${{ steps.v.outputs.version }}" packaging\installer.iss
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed" }
+          Compress-Archive -Path dist\MeshLens -DestinationPath "dist\MeshLens-${{ steps.v.outputs.version }}-portable.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MeshLens-${{ steps.v.outputs.version }}
+          path: |
+            dist/MeshLens-*-setup.exe
+            dist/MeshLens-*-portable.zip
+
+      - name: Publish release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          gh release create "${{ github.ref_name }}" `
+            "dist\MeshLens-${{ steps.v.outputs.version }}-setup.exe" `
+            "dist\MeshLens-${{ steps.v.outputs.version }}-portable.zip" `
+            --title "MeshLens ${{ steps.v.outputs.version }}" --generate-notes
