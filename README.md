@@ -10,7 +10,7 @@ It is a **tray app started when needed** with a **web control interface** in the
 2. **The router's view** from the ASUS AiMesh system: every client, which node and band it is on, signal and link rate, roaming, DHCP, radio settings.
 3. **The radio's view** from small ESP32 probes placed around the house: what is actually happening in the air on 2.4 GHz and 5 GHz (channel crowding, air time, broadcasts, re-sends, signal per room), which neither Windows nor the router can see.
 
-> **Status: specification only.** No code yet. These documents describe what the tool should do so the design can be agreed before building it.
+> **Status: first working slice.** Tray app, web UI with login, and the read-only ASUS AiMesh collector (MediaTek BT8 + Qualcomm BD4) with Wi-Fi journeys and kick/roam detection. See [development](docs/13-development.md) to run it and for what is done.
 
 ## Documents
 
@@ -28,6 +28,7 @@ It is a **tray app started when needed** with a **web control interface** in the
 | [Decisions](docs/10-decisions.md) | Agreed decisions (Python, tray app, read-only router, probe discovery and placements...) |
 | [Network inventory, services and security](docs/11-network-inventory-and-security.md) | Beyond Wi-Fi: services (mDNS, UPnP), open ports, router exposure and NAT, security hygiene, DHCP/DNS/ISP health, wired topology |
 | [Topology, history and enrichment](docs/12-topology-history-enrichment.md) | Interactive map, device pages with Wi-Fi details and handovers, history explorer, manual enrichment, feature backlog |
+| [Development](docs/13-development.md) | How to run and test, code layout, what the first slice implements |
 
 ## Related projects
 

@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+build/
+dist/
+*.egg-info/
+# Local data never belongs in the repo (device names, addresses, logs).
+*.db
+*.db-wal
+*.db-shm
+*.jsonl
+web_auth.json
+config.yaml
+captures/
