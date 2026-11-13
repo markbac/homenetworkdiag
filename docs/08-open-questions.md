@@ -1,41 +1,32 @@
 # Open questions
 
-Answered questions move to [decisions](10-decisions.md). **Answered so far:** language (Python, reuse), how it runs (tray app when needed), SSH (enabled, port 1111, stock firmware), subnets (one, `10.0.10.0/23`), router writes (read-only), probes move (placements), probe discovery (automatic), web control interface (yes).
+All questions from the first round are answered; see [decisions](10-decisions.md) D-01 to D-22.
 
-## Platform and packaging
+## Remaining
 
-1. **Language:** Python (reuse `homelab-unified` collectors, packaged with PyInstaller) or .NET 8 (native Windows, single binary, rewrite collectors)?
-2. **How should it run:** a tray app you start when needed, a background Windows service that runs all the time, or both?
-3. **Which PC:** always-on desktop, or a laptop you carry around (affects monitoring and probe sync)?
-4. **Admin rights:** acceptable to install Npcap and run parts as admin (needed for raw capture and some scans), or must it work as a normal user?
-5. **Relationship to `homelab-unified`:** separate tool that copies code, a shared Python package used by both, or should `homelab-unified` eventually be replaced by this?
+1. **Product name.** The repository stays `homenetworkdiag`. Candidates for the app's name:
+   - **MeshLens**: looks into the mesh (router, nodes, air) - short, descriptive. *(suggested)*
+   - **LagHunter**: says what it is for, friendlier for the family.
+   - **AirTrace**: emphasises the radio side.
+   - Keep **homenetworkdiag**.
+2. **Pi-hole and Home Assistant:** confirm they should be added as optional sources (D-22), and in which phase.
+3. **Probe screens:** which pages a stand-alone probe should show first (proposal: live signal, quick test, air survey summary, monitor status, placement).
+4. **Reports:** which sections a shareable report must contain (proposal: summary findings, evidence charts, device table with names optional/anonymised for sharing).
 
-## ESP32 probes
+## Decided recently (for reference)
 
-6. **Firmware base:** Arduino (like the CrowPanel firmware, easy reuse) or ESP-IDF directly (needed for some C5 5 GHz features)?
-7. **How many probes and where:** e.g. C5 portable, C6 fixed in the boys' room, CrowPanel in the kitchen?
-8. **Connection to the PC:** over Wi-Fi only, or also USB serial when plugged in (more robust, no extra Wi-Fi traffic)?
-9. **Stand-alone use:** should probes show results on their own screens (walk-around without the PC), or act purely as sensors?
-10. **Channel hopping:** may a probe briefly leave the network to survey other channels/bands, or must it stay connected?
-11. **Battery:** will the C5 have a battery fitted? (Its listing says batteries not included.)
-
-## ASUS
-
-12. **SSH:** is SSH enabled on the BT8 (LAN only), and are you happy for the tool to hold the admin password (DPAPI-encrypted)?
-13. **Firmware:** stock Asuswrt or Asuswrt-Merlin? (Changes available commands and logs.)
-14. **Write actions later:** should the tool ever change settings (e.g. multicast rate, disable guest SSID), with confirmation, or stay read-only forever?
-
-## Network and devices
-
-15. **Subnets/VLANs:** is everything on `10.0.10.0/23`, or are IoT/guest on separate subnets the PC cannot reach?
-16. **Fingbox / Domotz:** is `f0:23:b9:ed:95:4d` the Fingbox? Should the tool integrate with it (Fing API) or just treat it as a device?
-17. **Other sources:** use Pi-hole (DNS per device), the Synology NAS, Home Assistant presence, or Uptime Kuma as extra sources?
-18. **Key devices to watch:** which devices matter most (consoles, PCs, TVs) so they get per-device monitors by default?
-
-## Output and use
-
-19. **Dashboard access:** localhost only, or from phones on the LAN too (with a password)?
-20. **Alerts:** notifications when something goes wrong (Windows toast, email, Home Assistant, push), or dashboard only?
-21. **Reports:** do you want a shareable report (e.g. to send to an ISP or post on a forum)?
-22. **Data retention:** how long to keep raw data and per-minute history?
-23. **Name:** keep "homenetworkdiag"?
+| Topic | Answer |
+|---|---|
+| Language | Python, reuse `homelab-unified` |
+| How it runs | Tray app, always-on mini PC, admin available |
+| Relationship | Separate tool; `homelab-unified` later consumes its API |
+| Probe firmware | ESP-IDF where required |
+| Probes | Up to 6, moved around, Wi-Fi only, stand-alone with screens, may channel-hop, USB-C power banks |
+| Router | SSH port 1111, stock firmware, tool may hold the password, read-only forever |
+| Network | Everything on `10.0.10.0/23` |
+| Fingbox / Domotz | Removed from the network |
+| Watched devices | Chosen in the web UI |
+| Dashboard | LAN access from phones/laptops with login |
+| Alerts | None for now |
+| Reports | Yes |
+| Retention | 1 month |

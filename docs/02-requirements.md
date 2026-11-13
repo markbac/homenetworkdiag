@@ -7,6 +7,7 @@ Each requirement has an ID so later design, code and tests can refer to it. **Pr
 | ID | Requirement | Pri |
 |---|---|---|
 | DEV-01 | Discover every device on the configured LAN subnet(s) (e.g. `10.0.10.0/23`) using ARP, ping sweep, the Windows ARP/neighbour table, mDNS, SSDP and NetBIOS. | M |
+| DEV-10 | Optional sources (D-22): Pi-hole (DNS queries and latency per device) and Home Assistant (friendly names, presence). | S |
 | DEV-02 | Merge in the ASUS client list and DHCP leases (see ASUS-*) so devices that are asleep or silent still appear. | M |
 | DEV-03 | Key devices by MAC address; track IP changes, first seen, last seen, online/offline history. | M |
 | DEV-04 | Identify each device: hostname (DHCP, mDNS, NetBIOS, reverse DNS), vendor (IEEE registry, looked up locally), type (phone, console, TV, camera, plug, NAS...), using the classification rules from `homelab-unified`. | M |
@@ -47,7 +48,8 @@ Each requirement has an ID so later design, code and tests can refer to it. **Pr
 | PRB-06 | **Monitor** for 15 min to 8 h from the probe: per-minute ping, loss, spikes, signal, roams, DNS, air figures and top devices; events (drop-out with reason, roam, spike, loss burst, busy channel, broadcast flood, device hog). | M |
 | PRB-14 | **Autonomous operation:** probes run their own schedules (scans every minute, air surveys every N minutes, monitors) whether or not the Windows app is running, keep everything locally (SD card if fitted, otherwise a flash ring buffer: about 1 KB per monitored minute, so ~2 MB holds 1.5 days), and the tool syncs all of it when it next connects. Oldest data is dropped only when storage is full, and the probe reports that. | M |
 | PRB-07 | Probes stream results to the tool when it is running and **buffer when it is not** (the tray app is only started when needed); on start, the tool syncs everything since the last record it has (sequence numbers, no duplicates). Monitors scheduled on a probe run without the PC. | M |
-| PRB-08 | A probe can run stand-alone (battery, on its own screen) and sync results later. | S |
+| PRB-08 | **Stand-alone probes** (D-14): each shows its own results on screen (live signal, quick test, air survey summary, monitor status, placement) and works on a USB-C power bank without the PC. Up to 6 probes. | M |
+| PRB-15 | **Channel hopping allowed** (D-13): a probe may leave the network briefly to survey other channels/bands; hops are short, scheduled, logged, and never during monitor ping sampling. | M |
 | PRB-09 | Walk-around mode: live signal and quick test at a button press, tagged with a room name, to build a coverage map. | S |
 | PRB-10 | 802.15.4 (Zigbee/Thread) channel energy survey on ESP32-C6/C5, to spot overlap with 2.4 GHz Wi-Fi. | C |
 
@@ -97,10 +99,13 @@ Each requirement has an ID so later design, code and tests can refer to it. **Pr
 
 | ID | Requirement | Pri |
 |---|---|---|
-| UI-01 | **Web control interface** served by the tray app (localhost by default, LAN with a password as an option): Overview (health + top findings), Devices, Mesh map, Radio (per band/probe), Tests, Monitor timeline, Findings, Probes (adopt, place, start/stop, firmware), Settings. Every action is available here, not only viewing. | M |
+| UI-01 | **Web control interface** served by the tray app, **reachable from phones and laptops on the LAN with a login** (D-18): Overview (health + top findings), Devices, Mesh map, Radio (per band/probe), Tests, Monitor timeline, Findings, Probes (adopt, place, start/stop, firmware), Settings. Every action is available here, not only viewing. | M |
 | UI-06 | **Tray app**, started when needed: icon shows status (green / amber findings / red problem / grey collectors paused); menu: Open dashboard, Quick diagnosis, Pause collectors, Quit. Optionally start with Windows. | M |
 | UI-02 | Timeline view: lag spikes, loss, events, channel busy %, top devices and roams on one zoomable time axis. | M |
-| UI-03 | Export a report (HTML/PDF) of a session: findings, charts, device table. | S |
+| UI-03 | **Generate reports** (HTML and PDF) of a session or a period: findings, evidence charts, device table; option to anonymise names/MACs for sharing with an ISP or a forum. | M |
+| UI-07 | Choose **watched devices** in the web UI (e.g. gaming PCs, consoles); they get per-device ping monitors, journeys and a section in reports by default. | M |
+| UI-08 | **Versioned read API** for other consumers, so `homelab-unified` can use this tool for data collection (D-10). | S |
+| UI-09 | No alerts in the first release (D-19); findings are shown in the dashboard. | - |
 | UI-04 | All data available as JSON over a local API, and logged as JSON Lines; device table exportable as CSV. | M |
 | UI-05 | Plain-English help for every metric (what it is, good / bad ranges), as on the panel's Help page. | M |
 
@@ -111,8 +116,8 @@ Each requirement has an ID so later design, code and tests can refer to it. **Pr
 | NFR-01 | **Windows 10/11**, no Docker or WSL; **Python 3.12** packaged with PyInstaller, reusing `homelab-unified` code after review. Installs per user; admin only where unavoidable (e.g. raw packet capture), and the tool works with reduced features without it. | M |
 | NFR-02 | **Does not harm the network.** Scans are rate-limited (e.g. ARP sweep paced, not more than N packets/s), never continuous, and the tool reports its own traffic. It must never become the broadcast flood it is looking for. | M |
 | NFR-03 | **Privacy.** Everything stays on the LAN. No device addresses sent to online lookup services (vendor registry is downloaded and searched locally). Probes read frame headers only. | M |
-| NFR-04 | **Security.** Router and probe credentials stored with Windows DPAPI / Credential Manager; dashboard bound to localhost by default; probe API authenticated (shared token). | M |
-| NFR-05 | **Storage.** SQLite for inventory and time series; JSON Lines for raw logs; retention configurable (default 90 days). | M |
+| NFR-04 | **Security.** Router password and probe tokens stored with Windows DPAPI / Credential Manager; dashboard on the LAN behind a login (hashed password, rate-limited, session cookies), optional HTTPS with a self-signed certificate; probe API authenticated (shared token). | M |
+| NFR-05 | **Storage.** SQLite for inventory and time series; JSON Lines for raw logs; **retention 1 month** for raw and per-minute data (configurable), findings/device history/reports kept. | M |
 | NFR-06 | **Resilience.** Any single source (router, a probe, a scan) can be missing or failing without breaking the rest; each shows its own status. | M |
 | NFR-07 | **Observability.** Its own debug log with levels, rotated; a diagnostics bundle (logs + config without secrets) for troubleshooting. | S |
 | NFR-08 | **Testable.** Parsers (ASUS command output, probe JSON) covered by tests with captured fixtures from this network. | M |

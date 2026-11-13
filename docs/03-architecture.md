@@ -94,7 +94,7 @@ C4Component
 ```mermaid
 flowchart TB
   subgraph house["House LAN 10.0.10.0/23"]
-    subgraph pc["Windows 11 PC"]
+    subgraph pc["Always-on Windows mini PC"]
       tray["Tray app<br/>homenetworkdiag.exe"]
       eng["Engine + web UI<br/>http://localhost:8787"]
       data["%LOCALAPPDATA%\\homenetworkdiag<br/>db.sqlite, logs\\*.jsonl"]
@@ -107,14 +107,16 @@ flowchart TB
     c5["ESP32-C5 probe<br/>moves between rooms"]
     c6["ESP32-C6 probe"]
     cp["CrowPanel (kitchen)"]
-    phone["Phone browser<br/>(LAN mode, optional)"]
+    phone["Phones / laptops<br/>(LAN, login)"]
+    hl["homelab-unified<br/>(later: reads the API)"]
   end
   tray --> eng --> data
   eng -- SSH/HTTPS --> bt8
   eng -- SSH --> n1 & n2 & n3 & n4
   eng -- HTTP --> c5 & c6 & cp
   c5 & c6 & cp -. mDNS / UDP beacon .-> eng
-  phone -. HTTP + password .-> eng
+  phone -. HTTP(S) + login .-> eng
+  hl -. read API .-> eng
 ```
 
 ## 5. Key design points

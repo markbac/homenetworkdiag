@@ -67,12 +67,23 @@ If the two Windows PCs with USB adapters are the gaming PCs, their repeated disc
 
 The main router's 2.4 GHz radio reports 15.7% transmit failures and 22.6% receive CRC errors, against 6.1% / 4.5% on 5 GHz and 2.4% / 0.6% on 6 GHz. The 2.4 GHz SSIDs carried almost no data during the capture (< 0.1 Mbit/s) while the probe measured the channel 50 to 66% busy: the air is used by broadcasts and errors, not traffic.
 
-## 7. Latency symptoms
+## 7. After removing the Fingbox (same day, 15:41 to 15:44)
+
+| | Before (survey 4) | After (monitor minutes) |
+|---|---|---|
+| Channel busy | 66% | 31 to 40% |
+| Broadcast/multicast | 54% | 18 to 26% |
+| Your data | 3% | 2% |
+| Router ping | spikes of 500 to 1,000 ms every minute | 14 to 16 ms average; spikes in 2 of 6 minutes (673 and 743 ms) |
+
+The Fingbox (Domotz-registered `f0:23:b9:ed:95:4d`) was the main broadcast source. The remaining ~20% broadcast is mostly mDNS, which IGMP snooping (currently off) should reduce next.
+
+## 8. Latency symptoms
 
 - Monitor runs (2 to 4 minutes each) showed router ping spikes of 500 to 1,000 ms every minute, a few lost pings, and DNS lookups up to 3.5 s.
 - The panel's signal varied between -65 dBm and -82 dBm depending on which unit it was attached to (it moved between units after restarts).
 
-## 8. Other observations
+## 9. Other observations
 
 - One BD4 node is shown grey in the ASUS app with 0 clients; SSH shows Office and Garden are not managed nodes (section 4).
 - 2.4 GHz clients are mostly IoT: Espressif, Meross, Tuya, Motorola, Amazon, Google, HP printer, TP-Link.
