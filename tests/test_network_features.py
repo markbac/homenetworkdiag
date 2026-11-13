@@ -280,3 +280,10 @@ def test_proxy_arp_entries_are_not_devices():
     usable, proxied = split_proxied(arp, units)
     assert usable == {"10.0.11.7": "02:aa:00:00:00:01", "10.0.11.8": "02:aa:00:00:00:02"}
     assert sorted(proxied) == ["10.0.11.29", "10.0.11.5", "10.0.11.6"]
+
+
+def test_mdns_name_prefers_friendly():
+    from meshlens.discovery import mdns_name
+    assert mdns_name({"friendly": "Kitchen speaker", "names": ["Google-Nest-Mini-1cf29a"], "host": "1CF29A492944"}) == "Kitchen speaker"
+    assert mdns_name({"names": [], "host": "889425ca-3fa2-6f5e-849c-db966cddcf8e"}) is None
+    assert mdns_name({"names": ["NASHOME"], "host": "1CF29A492944"}) == "NASHOME"

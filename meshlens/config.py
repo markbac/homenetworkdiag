@@ -135,6 +135,15 @@ class MonitorConfig:
     expected_up_mbps: float = 0.0
 
 
+@dataclass
+class UpdateConfig:
+    """In-app updates from the project's GitHub releases."""
+
+    check_automatically: bool = True
+    check_hours: int = 24
+    include_prereleases: bool = False
+
+
 DEVICE_KINDS = ("unifi_switch", "tplink_easy_smart", "devolo", "managed_switch", "access_point", "other")
 
 
@@ -187,6 +196,7 @@ class Config:
     devolo: DevoloConfig = field(default_factory=DevoloConfig)
     discovery: DiscoveryConfig = field(default_factory=DiscoveryConfig)
     monitor: MonitorConfig = field(default_factory=MonitorConfig)
+    updates: UpdateConfig = field(default_factory=UpdateConfig)
 
     @property
     def path(self) -> Path:

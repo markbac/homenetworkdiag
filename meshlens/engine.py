@@ -10,7 +10,7 @@ import time
 from typing import Any
 
 from . import config as config_mod
-from . import analysis, oui, secrets, topology
+from . import analysis, oui, secrets, topology, updater
 from .collectors.asus.collector import AsusCollector
 from .collectors.devolo import DevoloCollector
 from .discovery import Discovery
@@ -31,6 +31,9 @@ class Engine:
         self.discovery = Discovery(lambda: self.cfg, self.root)
         self.monitor = PingMonitor(cfg.monitor, self._ping_targets)
         self.speed_status: dict[str, Any] = {"running": False, "last": None}
+        self.update_info: dict[str, Any] = {"available": False, "current": updater.__version__, "checked": None,
+                                            "state": None, "error": None, "self_update": updater.can_self_update()}
+        self.on_quit = None   # set by the tray: called after the installer has been started
         self._isp_hop: tuple[float, tuple[str, int] | None] = (0.0, None)
         self._stop = threading.Event()
         self._wake = threading.Event()
@@ -144,6 +147,44 @@ class Engine:
             self._analysis.clear()
         return row
 
+    # ------------------------------------------------------------ updates
+
+    def check_update(self) -> dict[str, Any]:
+        try:
+            info = updater.check(include_prereleases=self.cfg.updates.include_prereleases)
+            self.update_info.update(info, checked=time.time(), error=None)
+        except Exception as e:
+            self.update_info.update(checked=time.time(), error=f"could not check: {type(e).__name__}: {e}")
+        return self.update_info
+
+    def install_update(self) -> None:
+        """Download, verify and start the installer; MeshLens then quits so files can be replaced."""
+        u = self.update_info
+        if not u.get("available"):
+            u["error"] = "no update available"
+            return
+        if not updater.can_self_update():
+            u["error"] = "this copy runs from source: update it with git pull"
+            return
+        try:
+            u.update(state="downloading", error=None)
+            path = updater.download(u, self.root / "updates")
+            u["state"] = "starting installer (approve the Windows prompt)"
+            updater.launch_installer(path)
+            u["state"] = "installing: MeshLens will restart"
+        except Exception as e:
+            u.update(state=None, error=str(e))
+            return
+        threading.Timer(3.0, self._quit_for_update).start()
+
+    def _quit_for_update(self) -> None:
+        self.stop()
+        if self.on_quit:
+            self.on_quit()
+        else:
+            import os
+            os._exit(0)
+
     def rollup(self, now: float | None = None) -> None:
         """Daily summaries for today and yesterday (kept 12 months, D-25)."""
         import datetime as dt
@@ -171,6 +212,7 @@ class Engine:
             "devolo": self.devolo.status,
             "discovery": self.discovery.status,
             "speedtest": {"running": self.speed_status["running"]},
+            "update": self.update_info,
             "integrations": {s: {"enabled": getattr(self.cfg, s).enabled,
                                  "secret_set": bool(getattr(self.cfg, s).url) and
                                  secrets.has_secret(secrets.SERVICE_KINDS[s], secrets.service_ident(s, self.cfg)),
@@ -189,6 +231,7 @@ class Engine:
 
     def _loop(self) -> None:
         last_prune = 0.0
+        last_update_check = time.time() - self.cfg.updates.check_hours * 3600 + 120   # first check 2 min after start
         # With no test yet, the first scheduled one runs 10 minutes after start.
         last_speed = self._last_speedtest_ts() or time.time() - self.cfg.monitor.speedtest_hours * 3600 + 600
         while not self._stop.is_set():
@@ -208,6 +251,10 @@ class Engine:
                 if m.speedtest_hours and time.time() - last_speed > m.speedtest_hours * 3600:
                     last_speed = time.time()
                     threading.Thread(target=self.run_speedtest, args=("scheduled",), daemon=True).start()
+                u = self.cfg.updates
+                if u.check_automatically and time.time() - last_update_check > u.check_hours * 3600:
+                    last_update_check = time.time()
+                    threading.Thread(target=self.check_update, daemon=True).start()
                 if time.time() - last_prune > 3600:
                     try:
                         self.rollup()

@@ -7,6 +7,10 @@ const KIND_ICON = { internet: "🌐", router: "◎", node: "◉", powerline: "�
 
 function linkText(l) {
   if (!l || !l.type) return "";
+  if (l.type === "wireless" && l.bands && l.bands.length) {
+    return "Wi-Fi backhaul " + l.bands.map((b) => `${esc(b.band)} GHz <span class="${rssiClass(b.rssi)}">${esc(b.rssi ?? "?")} dBm</span>`
+      + (b.parent && b.parent !== l.bands[0].parent ? ` <span class="muted">(to ${esc(unitName(b.parent))})</span>` : "")).join(" · ");
+  }
   if (l.type === "wireless" || l.type === "wifi") {
     const parts = [LINK_TYPE[l.type], l.band ? `${l.band} GHz` : "", l.rssi != null ? `<span class="${rssiClass(l.rssi)}">${esc(l.rssi)} dBm</span>` : "",
       l.tx_rate ? `${esc(Math.round(l.tx_rate))} Mbit/s` : ""];
@@ -29,13 +33,21 @@ async function loadTopology() {
   const devOk = (n) => !onlyWeak || (n.health != null && n.health < 80) || (n.link.rssi != null && n.link.rssi < -70);
   const render = (n) => {
     const children = kids[n.id] || [];
-    const sub = children.filter(infra), devs = children.filter((c) => !infra(c) && devOk(c));
+    const sub = children.filter(infra);
+    // One computer with several connections (e.g. built-in Ethernet + a dock) shares a name: show it once.
+    const grouped = {};
+    for (const c of children.filter((c) => !infra(c) && devOk(c))) {
+      const key = /^([0-9a-f]{2}:){5}[0-9a-f]{2}$/i.test(c.label) ? c.mac : c.label.toLowerCase();
+      if (grouped[key]) { grouped[key].count += 1; grouped[key].ips.push(c.ip); }
+      else grouped[key] = { ...c, count: 1, ips: [c.ip] };
+    }
+    const devs = Object.values(grouped);
     const h = n.health && n.health.score != null ? ` <span class="pill ${scoreClass(n.health.score)}">${esc(n.health.score)}</span>` : "";
     const meta = [n.model, n.ip].filter(Boolean).map(esc).join(" · ");
     const devList = showDev && devs.length ? `<details class="topo-devs" ${devs.length <= 8 ? "open" : ""}><summary>${devs.length} device${devs.length > 1 ? "s" : ""}
         <span class="muted small">${devs.filter((d) => d.link.type === "wifi").length} Wi-Fi · ${devs.filter((d) => d.link.type !== "wifi").length} wired/other</span></summary>
-        <div class="chips">${devs.sort((a, b) => (a.link.rssi ?? 0) - (b.link.rssi ?? 0)).map((d) => `<a href="#" class="chip" data-mac="${esc(d.mac)}" title="${esc([d.ip, d.vendor, d.dtype].filter(Boolean).join(" · "))}">
-          ${d.watched ? "★ " : ""}${esc(d.label)} <span class="muted small">${linkText(d.link)}</span>${d.health != null && d.health < 60 ? ' <span class="bad">●</span>' : ""}</a>`).join("")}</div></details>` : "";
+        <div class="chips">${devs.sort((a, b) => (a.link.rssi ?? 0) - (b.link.rssi ?? 0)).map((d) => `<a href="#" class="chip" data-mac="${esc(d.mac)}" title="${esc([d.ips.filter(Boolean).join(", "), d.vendor, d.dtype, d.count > 1 ? `${d.count} network connections` : ""].filter(Boolean).join(" · "))}">
+          ${d.watched ? "★ " : ""}${esc(d.label)}${d.count > 1 ? ` <span class="pill">${d.count} connections</span>` : ""} <span class="muted small">${linkText(d.link)}</span>${d.health != null && d.health < 60 ? ' <span class="bad">●</span>' : ""}</a>`).join("")}</div></details>` : "";
     return `<li><div class="tnode ${esc(n.kind)} ${n.reachable === 0 ? "down" : ""}"><span class="ticon">${KIND_ICON[n.kind] || "•"}</span>
         <div><b>${esc(n.label)}</b>${h}<div class="muted small">${meta}</div>${n.parent ? `<div class="tlink small">${linkText(n.link)}</div>` : ""}</div></div>
         ${devList}${sub.length ? `<ul>${sub.map(render).join("")}</ul>` : ""}</li>`;

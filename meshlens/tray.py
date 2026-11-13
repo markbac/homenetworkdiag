@@ -98,6 +98,12 @@ def run(engine: Engine, url: str) -> None:
         engine.monitor.paused = engine.paused
         refresh(icon)
 
+    def install_update(icon, item):
+        threading.Thread(target=engine.install_update, daemon=True).start()
+
+    def update_label(item):
+        return f"Install update {engine.update_info.get('latest')}"
+
     def toggle_startup(icon, item):
         set_start_with_windows(not start_with_windows())
 
@@ -108,9 +114,15 @@ def run(engine: Engine, url: str) -> None:
 
     def updater(icon) -> None:
         icon.visible = True
+        told = None
         while not stop.wait(60):
             try:
                 refresh(icon)
+                latest = engine.update_info.get("latest")
+                if engine.update_info.get("available") and latest != told:
+                    told = latest
+                    icon.update_menu()
+                    icon.notify(f"MeshLens {latest} is available. Right-click the tray icon → Install update.", "MeshLens update")
             except Exception:
                 pass
 
@@ -118,10 +130,13 @@ def run(engine: Engine, url: str) -> None:
         pystray.MenuItem("Open dashboard", open_dashboard, default=True),
         pystray.MenuItem("Collect now", collect),
         pystray.MenuItem("Run speed test", speed),
+        pystray.MenuItem(update_label, install_update,
+                         visible=lambda item: bool(engine.update_info.get("available") and engine.update_info.get("self_update"))),
         pystray.MenuItem("Pause collectors", toggle_pause, checked=lambda item: engine.paused),
         pystray.MenuItem("Start with Windows", toggle_startup, checked=lambda item: start_with_windows(),
                          visible=sys.platform == "win32"),
         pystray.MenuItem("Quit", quit_),
     )
     icon = pystray.Icon("MeshLens", _icon(COLOURS["none"]), "MeshLens", menu)
+    engine.on_quit = lambda: (stop.set(), icon.stop())
     icon.run(setup=updater)

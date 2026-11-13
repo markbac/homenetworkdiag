@@ -53,6 +53,19 @@ def classify(d: dict[str, Any], open_ports: set[int]) -> str | None:
     return None
 
 
+_OPAQUE = __import__("re").compile(r"^(?:[0-9a-fA-F]{12}|[0-9a-fA-F]{8}-[0-9a-fA-F-]{27,})$")
+
+
+def mdns_name(s: dict[str, Any]) -> str | None:
+    """Best human name from an mDNS record: TXT friendly name, then a readable instance or host name."""
+    if s.get("friendly"):
+        return s["friendly"]
+    for n in [*(s.get("names") or []), s.get("host")]:
+        if n and not _OPAQUE.match(n.split("-")[-1] if n.count("-") == 1 else n):
+            return n
+    return None
+
+
 def split_proxied(arp: dict[str, str], units: list[dict[str, Any]]) -> tuple[dict[str, str], list[str]]:
     """Separate real ARP entries from ones a mesh unit answers for its clients.
 
@@ -168,7 +181,7 @@ class Discovery:
                 if old:
                     db.add_inventory_event(now, d["mac"], "new_service", {"service": svc})
             db.set_device_fields(d["mac"], services=json.dumps(sorted(new)), model=d.get("model") or s.get("model"))
-            db.merge_names(d["mac"], {"mdns": s["host"] or (s["names"][0] if s["names"] else None)})
+            db.merge_names(d["mac"], {"mdns": mdns_name(s)})
             n += 1
         try:
             upnp = services.ssdp_discover(cfg.network.subnets)

@@ -113,3 +113,6 @@ canvas.mini { width: 120px; height: 24px; }
 .speed-cards { display: flex; gap: 28px; flex-wrap: wrap; margin: 8px 0; }
 .speed-cards .big { font-size: 28px; font-weight: 700; }
 .grade.g-Ap, .grade.g-A { color: var(--good); } .grade.g-B { color: var(--good); } .grade.g-C { color: var(--warn); } .grade.g-D, .grade.g-F { color: var(--bad); }
+
+.update-banner { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; border-color: var(--accent); }
+pre.notes { white-space: pre-wrap; background: var(--chip); padding: 8px 10px; border-radius: 6px; max-height: 260px; overflow: auto; }
