@@ -79,7 +79,7 @@ function showTab(name, anchor) {
 async function start() {
   const st = await api("/api/auth/state");
   if (!st.logged_in) return showLogin();
-  $("#login").hidden = true; $("#tabs").hidden = false; $("#logout").hidden = false;
+  $("#login").hidden = true; $("#tabs").hidden = false; $("#logout").hidden = false; $("#phone-btn").hidden = false;
   await refreshBase();
   showTab((location.hash || "#overview").slice(1));
 }
@@ -229,8 +229,7 @@ async function openDevice(mac) {
     </div>
     ${typeof deviceExtras === "function" ? deviceExtras(d) : ""}
     ${d.issues.length ? "<h3>Issues</h3>" + d.issues.map((i, n) => renderIssue(i, n === 0)).join("") : ""}
-    <h3>Signal, last 24 h</h3><canvas class="spark" id="spark"></canvas>
-    <h3>Last 30 days <span class="muted small">kicks (red) and disconnects (amber) per day</span></h3><canvas class="spark" id="daily"></canvas>
+    ${deviceGraphsHtml(d.mac)}
     <h3>Journey (handovers, kicks, connects) <button class="help" data-help="journey">?</button></h3>
     <ul class="timeline">${d.journey.slice(-150).reverse().map((j) => `<li class="${esc(j.kind)}"><span class="muted small">${esc(fmtTime(j.ts))}</span>
       ${esc(KIND[j.kind] || j.kind)} · ${esc(unitName(j.unit))}${j.band ? " · " + esc(bandLabel(j.band)) : ""}
@@ -250,8 +249,7 @@ async function openDevice(mac) {
       <button type="submit">Save</button> <span id="enrich-msg" class="muted"></span>
     </form>`;
   $("#drawer").hidden = false;
-  drawSpark($("#spark"), d.history.map((x) => [x.ts, x.rssi]).filter((p) => p[1] != null));
-  drawDaily($("#daily"), d.daily);
+  deviceGraphs(d.mac, 24);
   $("#enrich").onsubmit = async (e) => {
     e.preventDefault();
     const f = new FormData(e.target); const body = Object.fromEntries(f.entries()); body.watched = f.has("watched");
@@ -472,6 +470,23 @@ function renderDeviceLogins(el) {
   };
 }
 
+// ---------------------------------------------------------------- phone
+async function showPhone() {
+  $("#phone-modal").hidden = false;
+  $("#phone-body").innerHTML = '<p class="muted">Finding the addresses that work…</p>';
+  const c = await api("/api/connect");
+  if (c.local_only) {
+    $("#phone-body").innerHTML = '<p class="warn">The dashboard only listens on this PC. Settings → Web interface → set <b>Listen on</b> to 0.0.0.0 and restart MeshLens.</p>';
+    return;
+  }
+  $("#phone-body").innerHTML = c.urls.length ? `<img class="qr" src="/api/connect/qr.svg?i=0" alt="QR code for ${esc(c.urls[0].url)}">` +
+    c.urls.map((u, i) => `<div class="url-row"><a href="${esc(u.url)}">${esc(u.url)}</a>${i === 0 ? ' <span class="pill">in the QR code</span>' : ""}
+      <div class="muted small">${esc(u.how)}</div>${i ? `<button class="link small" data-qr="${i}">show QR for this one</button>` : ""}</div>`).join("") +
+    "<p class=\"muted small\">If a phone cannot connect: check it is on the home Wi-Fi (not mobile data or the guest network), and that Windows allowed MeshLens on private networks (the installer option).</p>"
+    : "<p class=\"bad\">Could not work out this PC's address on the home network.</p>";
+  $("#phone-body").onclick = (ev) => { const b = ev.target.closest("[data-qr]"); if (b) $("#phone-body .qr").src = `/api/connect/qr.svg?i=${b.dataset.qr}`; };
+}
+
 // ---------------------------------------------------------------- updates
 function showUpdateBanner(u) {
   const b = $("#update-banner");
@@ -558,6 +573,9 @@ document.addEventListener("click", (e) => {
 document.addEventListener("DOMContentLoaded", () => {
   $("#drawer-close").onclick = () => ($("#drawer").hidden = true);
   $("#logout").onclick = async () => { await post("/api/auth/logout"); showLogin(); };
+  $("#phone-btn").onclick = showPhone;
+  $("#phone-close").onclick = () => ($("#phone-modal").hidden = true);
+  $("#phone-modal").onclick = (ev) => { if (ev.target.id === "phone-modal") $("#phone-modal").hidden = true; };
   ["#dev-search", "#dev-online", "#dev-watched"].forEach((s) => $(s).addEventListener("input", loadDevices));
   ["#ev-kind", "#ev-hours"].forEach((s) => $(s).addEventListener("change", loadEvents));
   ["#an-hours", "#an-sev"].forEach((s) => $(s).addEventListener("change", loadAnalysis));

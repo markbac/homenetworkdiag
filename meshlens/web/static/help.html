@@ -134,7 +134,47 @@
   off. MeshLens only scans inside your home network.</p>
 <h3 id="issue-new_open_port">New open port</h3><p>A device started offering a service it didn't before: an update, a setting or new software.</p>
 
+<h2 id="phone">Using MeshLens on your phone</h2>
+<p>Press <b>📱 Phone</b> at the top of the dashboard on the PC and point your phone's camera at the QR code. The phone must be on
+  the home Wi-Fi (not mobile data or the guest network). The dialog also lists every address that works:</p>
+<ul>
+  <li><b>The PC's name in the router's DNS</b> (for example <code>http://minisf.yourdomain:8787</code>): works from any device
+    that uses the router or Pi-hole for DNS, and doesn't change. This is the one in the QR code when the router knows the name.</li>
+  <li><b>The PC's address</b>: always works, but can change; reserve it in the router to keep it.</li>
+  <li><b>http://meshlens.local:8787</b>: MeshLens announces this name itself (mDNS). iPhones, iPads, Macs and Windows understand
+    it; many Android browsers don't.</li>
+</ul>
+<p>To make it feel like an app: on iPhone open it in Safari → Share → <i>Add to Home Screen</i>; on Android open it in Chrome →
+  ⋮ → <i>Add to Home screen</i>. Phones stay logged in for 30 days. If a phone can't connect at all, check the installer's
+  firewall option (or allow MeshLens on private networks in Windows Security).</p>
+
+<h2 id="graphs">Graphs</h2>
+<p>The Graphs tab draws everything MeshLens records for a chosen period (6 hours to 30 days). Hover any chart for exact values;
+  click a legend entry to hide that line.</p>
+<dl>
+  <dt>Wi-Fi devices online</dt><dd>How many devices were on each unit and each band. A unit that suddenly drops to zero has
+    restarted or lost its backhaul.</dd>
+  <dt>Wi-Fi events</dt><dd>Kicks, roam attempts, disconnects and refused joins per interval. Spikes line up with complaints.</dd>
+  <dt>Internet traffic</dt><dd>Download and upload through the router's internet connection, averaged per router poll. Compare
+    with lag: a full upload is the classic cause of bufferbloat.</dd>
+  <dt>Wi-Fi traffic per unit and band</dt><dd>Data through each radio. Shows which unit and band carry the load.</dd>
+  <dt>Latency and packet loss</dt><dd>Every monitored target on one chart; loss for the router and internet targets.</dd>
+  <dt>When is the internet laggy?</dt><dd>A week of internet latency by day and hour. A colour pattern at the same hours every
+    day points at congestion at home (evening streaming, backups) or at the ISP.</dd>
+  <dt>Signal strength</dt><dd>How many connected devices sit in each signal band right now.</dd>
+  <dt>Radio transmit failures</dt><dd>Each radio's failure rate over time; a rise that comes and goes is interference.</dd>
+  <dt>Powerline link speeds</dt><dd>The slower direction of each adapter pair over time.</dd>
+</dl>
+<p>Every device has its own graphs too (click it anywhere): signal, which unit and band it was on (each colour is a unit/band,
+  so roams and kicks show as colour changes), link speed, data used, Wi-Fi events, ping latency (for watched devices) and its
+  daily health score.</p>
+
 <h2 id="topology">Topology map</h2>
+<p>The <b>Diagram</b> view draws the network: the internet (with the last speed test, bufferbloat grade and latency), the
+  router and each mesh unit (health score, devices per band, worst radio error rate), powerline adapters, and every device as a
+  dot (colour = signal; red ring = poor health; blue ring = watched; click for details). Links show how units connect: Wi-Fi
+  backhaul with band and signal for each radio (dotted, coloured by signal), powerline with its speed each way (dashed), or
+  Ethernet. <i>Save PNG</i> / <i>Save SVG</i> download the picture. The <b>List</b> view shows the same as a tree of names.</p>
 <p>What is connected to what, built only from things MeshLens has actually measured:</p>
 <ul>
   <li><b>Mesh units</b> sit under the unit they connect through. A Wi-Fi backhaul shows its band, signal and rate (the node's

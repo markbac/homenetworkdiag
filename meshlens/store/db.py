@@ -520,3 +520,13 @@ def ping_minutes(since: float, target: str | None = None) -> list[dict[str, Any]
 
 def speed_tests(since: float) -> list[dict[str, Any]]:
     return _rows(conn().execute("SELECT * FROM speed_tests WHERE ts >= ? ORDER BY ts", (since,)))
+
+
+def iface_counters_since(since: float) -> list[dict[str, Any]]:
+    return _rows(conn().execute("SELECT * FROM iface_counters WHERE ts >= ? ORDER BY ts", (since,)))
+
+
+def radio_samples_since(since: float) -> list[dict[str, Any]]:
+    return _rows(conn().execute(
+        "SELECT ts, unit, iface, band, tx_fail_pct, rx_crc_pct, temperature, noise FROM radio_samples WHERE ts >= ? ORDER BY ts",
+        (since,)))

@@ -4,9 +4,18 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>MeshLens</title>
+<meta name="theme-color" content="#2463eb">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="MeshLens">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/icon-180.png">
+<link rel="icon" href="/icon-192.png">
 <link rel="stylesheet" href="/static/style.css">
 <script src="/static/app.js" defer></script>
 <script src="/static/views.js" defer></script>
+<script src="/static/charts.js" defer></script>
+<script src="/static/graphs.js" defer></script>
+<script src="/static/map.js" defer></script>
 </head>
 <body>
 <header>
@@ -16,12 +25,13 @@
     <button data-tab="analysis">Analysis</button>
     <button data-tab="topology">Topology</button>
     <button data-tab="tests">Tests</button>
+    <button data-tab="graphs">Graphs</button>
     <button data-tab="devices">Devices</button>
     <button data-tab="events">Wi-Fi events</button>
     <button data-tab="settings">Settings</button>
     <button data-tab="help">Help</button>
   </nav>
-  <div class="right"><span id="poll" class="muted"></span><button id="logout" class="link" hidden>Log out</button></div>
+  <div class="right"><button id="phone-btn" class="secondary small-btn" hidden title="Open MeshLens on your phone">📱 Phone</button><span id="poll" class="muted"></span><button id="logout" class="link" hidden>Log out</button></div>
 </header>
 
 <main>
@@ -79,13 +89,51 @@
   <section id="topology" class="tab" hidden>
     <div class="card">
       <div class="toolbar"><h3 style="margin:0">Network map <button class="help" data-help="topology">?</button></h3>
-        <label><input id="topo-devices" type="checkbox" checked> Show devices</label>
-        <label><input id="topo-weak" type="checkbox"> Only problem devices</label>
+        <span class="seg"><button data-view="diagram" class="on">Diagram</button><button data-view="list">List</button></span>
         <span id="topo-meta" class="muted small"></span></div>
-      <div id="topo-tree" class="topo"></div>
+      <div id="topo-map-wrap">
+        <div class="toolbar small">
+          <button id="map-out" class="secondary small-btn">−</button><button id="map-fit" class="secondary small-btn">Fit</button><button id="map-in" class="secondary small-btn">+</button>
+          <span class="muted">Dots are devices: colour = signal (<span class="good">●</span> strong <span style="color:var(--c5)">●</span> ok <span class="warn">●</span> weak <span class="bad">●</span> poor, grey = wired); red ring = poor health, blue ring = watched. Click a dot for details.</span>
+          <span class="spacer"></span><button id="map-png" class="secondary small-btn">Save PNG</button><button id="map-svg" class="secondary small-btn">Save SVG</button></div>
+        <div id="topo-map" class="topo-map"></div>
+      </div>
+      <div id="topo-list-wrap" hidden>
+        <div class="toolbar"><label><input id="topo-devices" type="checkbox" checked> Show devices</label>
+          <label><input id="topo-weak" type="checkbox"> Only problem devices</label></div>
+        <div id="topo-tree" class="topo"></div>
+      </div>
     </div>
     <div class="card"><h3>Powerline (devolo) <button class="help" data-help="powerline">?</button></h3>
       <div id="plc-body" class="muted">No powerline data yet.</div></div>
+  </section>
+
+  <section id="graphs" class="tab" hidden>
+    <div class="card toolbar"><h3 style="margin:0">Graphs <button class="help" data-help="graphs">?</button></h3>
+      <select id="gr-hours"><option value="6">last 6 h</option><option value="24" selected>last 24 h</option><option value="168">last 7 days</option><option value="720">last 30 days</option></select>
+      <span class="muted small">Hover a chart for values; click a legend entry to hide it.</span></div>
+    <div class="grid">
+      <div class="card"><h3>Wi-Fi devices online, per unit</h3><div id="gr-clients" class="chart-box"></div></div>
+      <div class="card"><h3>Wi-Fi devices per band</h3><div id="gr-bands" class="chart-box"></div></div>
+    </div>
+    <div class="card"><h3>Wi-Fi events</h3><div id="gr-events" class="chart-box"></div>
+      <p class="muted small">Kicks = the mesh disconnected a weak device; roam attempts = it tried to move one; failed joins = a device was refused.</p></div>
+    <div class="grid">
+      <div class="card"><h3>Internet traffic</h3><div id="gr-wan" class="chart-box"></div><p id="gr-wan-note" class="muted small"></p></div>
+      <div class="card"><h3>Wi-Fi traffic per unit and band</h3><div id="gr-wifi" class="chart-box"></div></div>
+    </div>
+    <div class="grid">
+      <div class="card"><h3>Latency</h3><div id="gr-latency" class="chart-box"></div></div>
+      <div class="card"><h3>Packet loss</h3><div id="gr-loss" class="chart-box"></div></div>
+    </div>
+    <div class="card"><h3>When is the internet laggy? <span class="muted small">typical worst-case latency by day and hour, last 7 days</span></h3>
+      <div id="gr-heat" class="chart-box"></div>
+      <div class="legend"><span><i style="background:var(--good)"></i>under 25 ms</span><span><i style="background:var(--c5)"></i>25-50</span><span><i style="background:var(--warn)"></i>50-100</span><span><i style="background:var(--bad)"></i>over 100 ms</span></div></div>
+    <div class="grid">
+      <div class="card"><h3>Signal strength of connected devices</h3><div id="gr-rssi" class="chart-box"></div><p class="muted small">dBm; further right is stronger. Below -70 is weak.</p></div>
+      <div class="card"><h3>Radio transmit failures</h3><div id="gr-radio" class="chart-box"></div></div>
+    </div>
+    <div class="card"><h3>Powerline link speeds <span class="muted small">slower direction of each pair</span></h3><div id="gr-plc" class="chart-box"></div></div>
   </section>
 
   <section id="tests" class="tab" hidden>
@@ -151,6 +199,16 @@
     <div class="card help-body" id="help-body"><p class="muted">Loading help…</p></div>
   </section>
 </main>
+
+<div id="phone-modal" class="modal" hidden><div class="card modal-card">
+  <button id="phone-close" class="link" style="float:right">&times; Close</button>
+  <h3>Open MeshLens on your phone</h3>
+  <p class="muted small">Your phone must be on the home Wi-Fi. Point its camera at the code, or type one of the addresses.</p>
+  <div id="phone-body"></div>
+  <h4>Make it an app</h4>
+  <p class="small"><b>iPhone / iPad:</b> open the address in Safari → Share → <i>Add to Home Screen</i>.<br>
+    <b>Android:</b> open it in Chrome → ⋮ menu → <i>Add to Home screen</i>. You stay logged in for 30 days.</p>
+</div></div>
 
 <aside id="drawer" hidden>
   <button id="drawer-close" class="link">&times; Close</button>

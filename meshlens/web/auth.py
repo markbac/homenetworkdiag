@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 
 ITERATIONS = 310_000
-SESSION_SECONDS = 7 * 86400
+SESSION_SECONDS = 30 * 86400   # phones stay logged in for a month
 MAX_FAILURES = 5          # per client address
 LOCKOUT_SECONDS = 300
 
