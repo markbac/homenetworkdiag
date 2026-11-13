@@ -82,9 +82,13 @@ def test_migration_adds_columns(tmp_path):
     c = sqlite3.connect(old)
     c.execute("CREATE TABLE units (mac TEXT PRIMARY KEY, model TEXT)")
     c.execute("INSERT INTO units(mac, model) VALUES ('aa', 'BT8')")
+    c.execute("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT)")
+    c.execute("CREATE TABLE devices (mac TEXT PRIMARY KEY, name TEXT)")
     c.commit()
     c.close()
     db.init(old)
     cols = {r[1] for r in db.conn().execute("PRAGMA table_info(units)")}
-    assert {"macs", "chip", "alias"} <= cols and db.units()[0]["model"] == "BT8"
+    assert {"macs", "chip", "alias", "parent_hint"} <= cols and db.units()[0]["model"] == "BT8"
+    dcols = {r[1] for r in db.conn().execute("PRAGMA table_info(devices)")}
+    assert {"last_alive", "names", "dtype", "watched", "user_name"} <= dcols
     db.close()

@@ -185,15 +185,16 @@ function drawTrend(canvas, days) {
 async function loadDevices() {
   const { devs } = await refreshBase();
   const q = $("#dev-search").value.toLowerCase(), online = $("#dev-online").checked, watched = $("#dev-watched").checked;
-  const rows = devs.filter((d) => (!online || d.live || (d.wired && Date.now() / 1000 - d.last_seen < 900))
+  const now = Date.now() / 1000;
+  const rows = devs.filter((d) => (!online || d.live || (d.wired && now - d.last_seen < 900) || (d.last_alive && now - d.last_alive < 1800))
     && (!watched || d.watched)
     && (!q || [d.user_name, d.name, d.ip, d.mac, d.vendor, d.owner, d.room].join(" ").toLowerCase().includes(q)));
   $("#dev-count").textContent = `${rows.length} of ${devs.length}`;
-  $("#devices-table").innerHTML = "<thead><tr><th>Name</th><th>IP</th><th>Vendor</th><th>Connection</th><th>Signal</th><th>Rate tx/rx</th><th>Security</th><th>Last seen</th></tr></thead><tbody>" +
+  $("#devices-table").innerHTML = "<thead><tr><th>Name</th><th>Type</th><th>IP</th><th>Vendor</th><th>Connection</th><th>Signal</th><th>Rate tx/rx</th><th>Security</th><th>Last seen</th></tr></thead><tbody>" +
     rows.map((d) => { const l = d.live || {};
       return `<tr data-mac="${esc(d.mac)}"><td>${d.watched ? "&#9733; " : ""}${esc(d.user_name || d.name || d.mac)}${d.randomised ? ' <span class="pill">private MAC</span>' : ""}</td>
-      <td>${esc(d.ip)}</td><td>${esc(d.vendor)}</td>
-      <td>${d.wired ? "wired" : esc(`${bandLabel(l.band || d.band)} · ${unitName(l.unit || d.unit)}`)}</td>
+      <td class="muted">${esc(d.user_type || d.dtype || "")}</td><td>${esc(d.ip)}</td><td>${esc(d.vendor)}</td>
+      <td>${d.wired ? "wired" : (l.band || d.band) ? esc(`${bandLabel(l.band || d.band)} · ${unitName(l.unit || d.unit)}`) : '<span class="muted">LAN</span>'}</td>
       <td class="${rssiClass(l.rssi)}">${l.rssi ?? ""}</td><td>${l.tx_rate != null ? esc(`${l.tx_rate}/${l.rx_rate ?? "?"}`) : ""}</td>
       <td>${esc(d.wifi_auth)}</td><td class="muted">${esc(ago(d.last_seen))}</td></tr>`; }).join("") + "</tbody>";
 }
@@ -210,13 +211,14 @@ async function openDevice(mac) {
       <div>IP</div><div>${esc(d.ip)}</div>
       <div>Vendor</div><div>${esc(d.vendor)} <span class="muted small">${esc(d.vendor_src)}</span></div>
       <div>Detected name</div><div>${esc(d.name)} <span class="muted small">${esc(d.name_src)}</span></div>
-      <div>Connection</div><div>${d.wired ? "wired" : esc(`${bandLabel(last.band || d.band)} via ${unitName(last.unit || d.unit)}${last.iface ? " (" + last.iface + ")" : ""}`)}</div>
+      <div>Connection</div><div>${d.wired ? "wired" + (d.unit ? " via " + esc(unitName(d.unit)) : "") : (last.band || d.band) ? esc(`${bandLabel(last.band || d.band)} via ${unitName(last.unit || d.unit)}${last.iface ? " (" + last.iface + ")" : ""}`) : '<span class="muted">not known to the router (found by discovery)</span>'}</div>
       <div>Signal now</div><div class="${rssiClass(last.rssi)}">${last.rssi != null ? esc(last.rssi) + " dBm" : "n/a"}</div>
       <div>Typical signal</div><div class="${rssiClass(h.typical_rssi)}">${h.typical_rssi != null ? Math.round(h.typical_rssi) + " dBm" : "n/a"}</div>
       <div>Rate tx / rx</div><div>${last.tx_rate != null ? esc(`${last.tx_rate} / ${last.rx_rate} Mbit/s`) : "n/a"}</div>
       <div>Wi-Fi security</div><div>${esc(d.wifi_auth)}</div>
       <div>Last 24 h</div><div>${s.mac ? esc(`${s.kicks} kicks, ${s.roam_attempts} roam attempts, ${s.disconnects} disconnects`) : "no Wi-Fi events"}</div>
     </div>
+    ${typeof deviceExtras === "function" ? deviceExtras(d) : ""}
     ${d.issues.length ? "<h3>Issues</h3>" + d.issues.map((i, n) => renderIssue(i, n === 0)).join("") : ""}
     <h3>Signal, last 24 h</h3><canvas class="spark" id="spark"></canvas>
     <h3>Last 30 days <span class="muted small">kicks (red) and disconnects (amber) per day</span></h3><canvas class="spark" id="daily"></canvas>
@@ -310,6 +312,30 @@ const SECTIONS = [
     { k: "username", label: "Username (local View Only admin, no 2FA)", type: "text" }, { k: "site", label: "Site", type: "text" },
     { k: "verify_tls", label: "Check HTTPS certificate (off for the local self-signed one)", type: "bool" }] },
   { id: "devices", title: "Switches and other devices", help: "set-devices", custom: renderDeviceLogins },
+  { id: "devolo", title: "Powerline (devolo)", help: "set-devolo", note: "Read-only via the devolo device API; any one adapter reports the whole powerline network. No password needed.", fields: [
+    { k: "enabled", label: "Read devolo adapters", type: "bool" },
+    { k: "adapters", label: "Adapter addresses (one per line; empty = devolo devices found on the network)", type: "list" },
+    { k: "poll_seconds", label: "Read every (seconds)", type: "number" },
+    { k: "slow_mbps", label: "Report links slower than (Mbit/s)", type: "number" }, { k: "bad_mbps", label: "…as high severity below (Mbit/s)", type: "number" }] },
+  { id: "discovery", title: "Discovery and ports", help: "set-discovery", note: "Finds devices on the subnets under Network: paced ping sweep, ARP table, names (DNS, NetBIOS, mDNS, UPnP) and a TCP port scan. Nothing outside your subnets is touched.", fields: [
+    { k: "enabled", label: "Run discovery on a schedule", type: "bool" },
+    { k: "sweep_minutes", label: "Find devices every (minutes)", type: "number" },
+    { k: "services_minutes", label: "Look up names and services every (minutes)", type: "number" },
+    { k: "port_scan_hours", label: "Scan ports every (hours, 0 = only when asked)", type: "number" },
+    { k: "port_set", label: "Ports to scan", type: "select", opts: [["top100", "Common home-network ports (about 85)"], ["top1000", "Ports 1-1024 plus common ones (slower)"]] },
+    { k: "max_rate", label: "At most this many probes per second", type: "number" }] },
+  { id: "monitor", title: "Monitors and speed tests", help: "set-monitor", note: "Pings the router, mesh units, the first ISP router, internet targets and watched devices; speed tests measure bufferbloat too.", fields: [
+    { k: "enabled", label: "Run the latency monitor", type: "bool" },
+    { k: "interval_seconds", label: "Ping every (seconds)", type: "number" },
+    { k: "internet_targets", label: "Internet targets (one per line)", type: "list" },
+    { k: "extra_targets", label: "Other targets, e.g. a game server (one per line)", type: "list" },
+    { k: "include_nodes", label: "Ping each mesh unit", type: "bool" }, { k: "include_isp_hop", label: "Ping the ISP's first router", type: "bool" },
+    { k: "include_watched", label: "Ping watched devices", type: "bool" },
+    { k: "speedtest_hours", label: "Speed test every (hours, 0 = only when asked)", type: "number", hint: "each test moves a few hundred MB" },
+    { k: "speedtest_seconds", label: "Seconds per direction", type: "number" },
+    { k: "speedtest_server", label: "Speed test server", type: "text" },
+    { k: "expected_down_mbps", label: "Your plan's download (Mbit/s, 0 = unknown)", type: "number" },
+    { k: "expected_up_mbps", label: "Your plan's upload (Mbit/s, 0 = unknown)", type: "number" }] },
   { id: "analysis", title: "Analysis thresholds", help: "set-analysis", note: "When MeshLens raises an issue. Defaults suit a typical home mesh.", fields: [
     { k: "kick_loop_count", label: "Kick loop: kicks", type: "number" }, { k: "kick_loop_minutes", label: "…within minutes", type: "number" },
     { k: "roam_storm_count", label: "Roam storm: attempts", type: "number" }, { k: "roam_storm_seconds", label: "…within seconds", type: "number" },

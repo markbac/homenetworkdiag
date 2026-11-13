@@ -69,7 +69,7 @@ def _thresholds(settings: dict[str, dict[str, str]], units: list[dict[str, Any]]
 
 def analyse(events: Iterable[dict[str, Any]], samples: Iterable[dict[str, Any]], radios: list[dict[str, Any]],
             units: list[dict[str, Any]], devices: list[dict[str, Any]], settings: dict[str, dict[str, str]],
-            cfg: AnalysisConfig | None = None, now: float | None = None) -> dict[str, Any]:
+            cfg: AnalysisConfig | None = None, now: float | None = None, net: dict[str, Any] | None = None) -> dict[str, Any]:
     """Run every rule. Returns issues (most severe first) and device / unit / network health."""
     cfg = cfg or AnalysisConfig()
     now = now or time.time()
@@ -372,6 +372,9 @@ def analyse(events: Iterable[dict[str, Any]], samples: Iterable[dict[str, Any]],
                                  "new when they change address).",
                                  ["If you don't recognise it, give it a name in Devices or change the Wi-Fi password."]))
 
+    if net:
+        from .analysis_net import net_issues
+        issues += net_issues(net, devs, now)
     issues.sort(key=lambda i: (SEVERITY_ORDER[i["severity"]], -(i.get("to") or 0)))
 
     # ------------------------------------------------ health

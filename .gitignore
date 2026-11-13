@@ -13,3 +13,5 @@ dist/
 web_auth.json
 config.yaml
 captures/
+packaging/meshlens.ico
+packaging/version_info.txt

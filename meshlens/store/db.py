@@ -29,7 +29,13 @@ CREATE TABLE IF NOT EXISTS devices (
   wifi_auth TEXT, unit TEXT, band TEXT,
   -- manual enrichment (ENR-01): always wins over detected values
   user_name TEXT, owner TEXT, room TEXT, user_type TEXT, tags TEXT, notes TEXT,
-  watched INTEGER DEFAULT 0
+  watched INTEGER DEFAULT 0,
+  -- discovery (DEV-01, SVC-*)
+  names TEXT,                     -- JSON {source: name}: dhcp, mdns, netbios, dns, ssdp
+  services TEXT,                  -- JSON list of mDNS/SSDP services
+  model TEXT, dtype TEXT,         -- detected model, classified type
+  last_alive REAL,                -- last answered a ping / ARP
+  ports_scanned REAL
 );
 
 CREATE TABLE IF NOT EXISTS units (
@@ -37,7 +43,8 @@ CREATE TABLE IF NOT EXISTS units (
   model TEXT, productid TEXT, ip TEXT, role TEXT, alias TEXT,
   chip TEXT, firmware TEXT,
   macs TEXT,                      -- JSON list: every radio/BSSID/backhaul address of the unit
-  reachable INTEGER, last_seen REAL, last_error TEXT
+  reachable INTEGER, last_seen REAL, last_error TEXT,
+  parent_hint TEXT                -- preferred parent BSSID from the node's own settings
 );
 
 CREATE TABLE IF NOT EXISTS station_samples (
@@ -72,6 +79,39 @@ CREATE TABLE IF NOT EXISTS unit_settings (
   ts REAL, unit TEXT, data TEXT
 );
 
+CREATE TABLE IF NOT EXISTS ports (
+  mac TEXT, proto TEXT, port INTEGER, ip TEXT, service TEXT, banner TEXT, title TEXT, risk TEXT,
+  first_seen REAL, last_seen REAL, open INTEGER,
+  PRIMARY KEY (mac, proto, port)
+);
+
+CREATE TABLE IF NOT EXISTS inventory_events (
+  ts REAL, mac TEXT, kind TEXT, detail TEXT
+);
+CREATE INDEX IF NOT EXISTS inv_ts ON inventory_events(ts);
+
+CREATE TABLE IF NOT EXISTS plc_adapters (
+  mac TEXT PRIMARY KEY, ip TEXT, name TEXT, product TEXT, firmware TEXT,
+  attached_to_router INTEGER, bridged TEXT, last_seen REAL
+);
+
+CREATE TABLE IF NOT EXISTS plc_rates (
+  ts REAL, src TEXT, dst TEXT, tx_mbps INTEGER, rx_mbps INTEGER
+);
+CREATE INDEX IF NOT EXISTS plc_ts ON plc_rates(ts);
+
+CREATE TABLE IF NOT EXISTS ping_minutes (
+  ts REAL, target TEXT, kind TEXT, label TEXT,
+  sent INTEGER, lost INTEGER, avg_ms REAL, min_ms REAL, max_ms REAL, p95_ms REAL, jitter_ms REAL
+);
+CREATE INDEX IF NOT EXISTS ping_ts ON ping_minutes(ts);
+CREATE INDEX IF NOT EXISTS ping_target_ts ON ping_minutes(target, ts);
+
+CREATE TABLE IF NOT EXISTS speed_tests (
+  ts REAL, server TEXT, down_mbps REAL, up_mbps REAL,
+  idle_ms REAL, down_loaded_ms REAL, up_loaded_ms REAL, grade TEXT, trigger TEXT, error TEXT
+);
+
 CREATE TABLE IF NOT EXISTS daily_device_summary (
   day TEXT, mac TEXT, kicks INTEGER, roams INTEGER, connects INTEGER, disconnects INTEGER,
   min_rssi INTEGER, max_rssi INTEGER,
@@ -99,7 +139,12 @@ def init(path: Path) -> None:
 def _add_missing_columns(c: sqlite3.Connection) -> None:
     """Lightweight migration: add columns that newer versions of SCHEMA define."""
     import re
-    for table, body in re.findall(r"CREATE TABLE IF NOT EXISTS (\w+) \((.*?)\n\);", SCHEMA, re.S):
+    tables = []
+    for chunk in SCHEMA.split("CREATE TABLE IF NOT EXISTS ")[1:]:
+        m = re.match(r"(\w+) \((.*)\);", chunk.split("CREATE INDEX")[0].strip(), re.S)
+        if m:
+            tables.append((m.group(1), m.group(2)))
+    for table, body in tables:
         have = {r[1] for r in c.execute(f"PRAGMA table_info({table})")}
         for line in body.splitlines():
             line = line.split("--")[0].strip().rstrip(",")
@@ -212,10 +257,12 @@ def prune(raw_days: int, summary_days: int, now: float | None = None) -> None:
     cut = now - raw_days * 86400
     with _write_lock:
         c = conn()
-        for t in ("station_samples", "radio_samples", "iface_counters", "events", "unit_settings"):
+        for t in ("station_samples", "radio_samples", "iface_counters", "events", "unit_settings", "inventory_events",
+                  "plc_rates", "ping_minutes"):
             c.execute(f"DELETE FROM {t} WHERE ts < ?", (cut,))
         day_cut = time.strftime("%Y-%m-%d", time.localtime(now - summary_days * 86400))
         c.execute("DELETE FROM daily_device_summary WHERE day < ?", (day_cut,))
+        c.execute("DELETE FROM speed_tests WHERE ts < ?", (now - summary_days * 86400,))
         c.commit()
 
 
@@ -329,3 +376,144 @@ def daily_summary(since_day: str, mac: str | None = None) -> list[dict[str, Any]
         q += " AND mac = ?"
         args.append(mac.lower())
     return _rows(conn().execute(q + " ORDER BY day", args))
+
+
+# ---------------------------------------------------------------- discovery
+
+def merge_names(mac: str, names: dict[str, str]) -> None:
+    """Record names per source (SVC-03) without touching the router/DHCP name or the user's name."""
+    d = device(mac)
+    if not d:
+        return
+    cur = json.loads(d.get("names") or "{}")
+    cur.update({k: v for k, v in names.items() if v})
+    fields: dict[str, Any] = {"names": json.dumps(cur, sort_keys=True)}
+    if not d.get("name"):
+        for src in ("mdns", "netbios", "dhcp", "ssdp", "dns"):
+            if cur.get(src):
+                fields["name"], fields["name_src"] = cur[src], src
+                break
+    set_device_fields(mac, **fields)
+
+
+def set_device_fields(mac: str, **fields: Any) -> None:
+    """Update detected fields of an existing device (None values are written)."""
+    if not fields:
+        return
+    with _write_lock:
+        c = conn()
+        c.execute(f"UPDATE devices SET {', '.join(f'{k} = ?' for k in fields)} WHERE mac = ?", (*fields.values(), mac.lower()))
+        c.commit()
+
+
+def device_by_ip(ip: str) -> dict[str, Any] | None:
+    r = conn().execute("SELECT * FROM devices WHERE ip = ? ORDER BY last_seen DESC LIMIT 1", (ip,)).fetchone()
+    return dict(r) if r else None
+
+
+def record_ports(mac: str, ip: str, found: list[dict[str, Any]], scanned: list[int], proto: str,
+                 now: float) -> list[dict[str, Any]]:
+    """Store a scan result; returns open/close changes (PRT-03)."""
+    mac = mac.lower()
+    changes = []
+    c = conn()
+    before = {r["port"]: dict(r) for r in c.execute("SELECT * FROM ports WHERE mac = ? AND proto = ?", (mac, proto))}
+    first_scan = not before
+    with _write_lock:
+        for f in found:
+            old = before.get(f["port"])
+            if not old or not old["open"]:
+                changes.append({"kind": "port_opened", "port": f["port"], "proto": proto, "service": f.get("service"),
+                                "first_scan": first_scan})
+            c.execute("""INSERT INTO ports(mac, proto, port, ip, service, banner, title, risk, first_seen, last_seen, open)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                         ON CONFLICT(mac, proto, port) DO UPDATE SET ip = excluded.ip, service = excluded.service,
+                           banner = COALESCE(excluded.banner, banner), title = COALESCE(excluded.title, title),
+                           risk = excluded.risk, last_seen = excluded.last_seen, open = 1""",
+                      (mac, proto, f["port"], ip, f.get("service"), f.get("banner"), f.get("title"), f.get("risk"), now, now))
+        open_now = {f["port"] for f in found}
+        for port, old in before.items():
+            if old["open"] and port in scanned and port not in open_now:
+                c.execute("UPDATE ports SET open = 0 WHERE mac = ? AND proto = ? AND port = ?", (mac, proto, port))
+                changes.append({"kind": "port_closed", "port": port, "proto": proto, "service": old.get("service")})
+        c.execute("UPDATE devices SET ports_scanned = ? WHERE mac = ?", (now, mac))
+        for ch in changes:
+            c.execute("INSERT INTO inventory_events(ts, mac, kind, detail) VALUES (?, ?, ?, ?)",
+                      (now, mac, ch["kind"], json.dumps(ch)))
+        c.commit()
+    return changes
+
+
+def open_ports(mac: str | None = None) -> list[dict[str, Any]]:
+    q, args = "SELECT * FROM ports WHERE open = 1", []
+    if mac:
+        q += " AND mac = ?"
+        args.append(mac.lower())
+    return _rows(conn().execute(q + " ORDER BY mac, port", args))
+
+
+def inventory_events(since: float, mac: str | None = None) -> list[dict[str, Any]]:
+    q, args = "SELECT * FROM inventory_events WHERE ts >= ?", [since]
+    if mac:
+        q += " AND mac = ?"
+        args.append(mac.lower())
+    out = _rows(conn().execute(q + " ORDER BY ts DESC", args))
+    for e in out:
+        e["detail"] = json.loads(e["detail"] or "{}")
+    return out
+
+
+def add_inventory_event(ts: float, mac: str, kind: str, detail: dict[str, Any]) -> None:
+    with _write_lock:
+        c = conn()
+        c.execute("INSERT INTO inventory_events(ts, mac, kind, detail) VALUES (?, ?, ?, ?)",
+                  (ts, mac.lower(), kind, json.dumps(detail)))
+        c.commit()
+
+
+# ---------------------------------------------------------------- powerline
+
+def store_plc(adapters: list[dict[str, Any]], rates: list[dict[str, Any]], now: float) -> None:
+    with _write_lock:
+        c = conn()
+        for a in adapters:
+            c.execute("""INSERT INTO plc_adapters(mac, ip, name, product, firmware, attached_to_router, bridged, last_seen)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                         ON CONFLICT(mac) DO UPDATE SET ip = excluded.ip, name = excluded.name, product = excluded.product,
+                           firmware = excluded.firmware, attached_to_router = excluded.attached_to_router,
+                           bridged = excluded.bridged, last_seen = excluded.last_seen""",
+                      (a["mac"], a.get("ip"), a.get("name"), a.get("product"), a.get("firmware"),
+                       1 if a.get("attached_to_router") else 0, json.dumps(a.get("bridged") or []), now))
+        c.executemany("INSERT INTO plc_rates(ts, src, dst, tx_mbps, rx_mbps) VALUES (?, ?, ?, ?, ?)",
+                      [(now, r["src"], r["dst"], r["tx_mbps"], r["rx_mbps"]) for r in rates])
+        c.commit()
+
+
+def plc_adapters() -> list[dict[str, Any]]:
+    out = _rows(conn().execute("SELECT * FROM plc_adapters ORDER BY attached_to_router DESC, name"))
+    for a in out:
+        a["bridged"] = json.loads(a["bridged"] or "[]")
+    return out
+
+
+def plc_latest_rates() -> list[dict[str, Any]]:
+    return _rows(conn().execute(
+        "SELECT r.* FROM plc_rates r JOIN (SELECT MAX(ts) AS ts FROM plc_rates) m ON r.ts = m.ts ORDER BY src, dst"))
+
+
+def plc_rate_history(since: float) -> list[dict[str, Any]]:
+    return _rows(conn().execute("SELECT * FROM plc_rates WHERE ts >= ? ORDER BY ts", (since,)))
+
+
+# ---------------------------------------------------------------- monitors
+
+def ping_minutes(since: float, target: str | None = None) -> list[dict[str, Any]]:
+    q, args = "SELECT * FROM ping_minutes WHERE ts >= ?", [since]
+    if target:
+        q += " AND target = ?"
+        args.append(target)
+    return _rows(conn().execute(q + " ORDER BY ts", args))
+
+
+def speed_tests(since: float) -> list[dict[str, Any]]:
+    return _rows(conn().execute("SELECT * FROM speed_tests WHERE ts >= ? ORDER BY ts", (since,)))

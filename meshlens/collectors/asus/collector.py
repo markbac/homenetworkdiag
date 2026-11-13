@@ -136,6 +136,7 @@ class AsusCollector:
                 productid=ident.get("productid") or None, chip=r.chip if r.ok else None,
                 firmware=f"{ident.get('firmver')}.{ident.get('buildno')}_{ident.get('extendno')}" if ident.get("firmver") else None,
                 alias="Main router" if r.main else (aliases.get(r.mac) or {}).get("alias"),
+                parent_hint=None if r.main else (aliases.get(r.mac) or {}).get("prefer_parent"),
                 reachable=1 if r.ok else 0, last_seen=now if r.ok else None, last_error=r.error or "",
                 macs=json.dumps(sorted({r.mac, *(i["addr"] for i in P.parse_iw_dev(r.sections.get("iw_dev", "")) if i.get("addr")),
                                         *backhaul.get(r.mac, {}).values()})) if r.ok else None)
@@ -162,7 +163,7 @@ class AsusCollector:
         # Units that appear in the client data but are not managed nodes (e.g. Office, Garden).
         for unit_mac, a in aliases.items():
             if unit_mac not in models:
-                db.upsert_unit(unit_mac, role="node", alias=a.get("alias"), reachable=0,
+                db.upsert_unit(unit_mac, role="node", alias=a.get("alias"), reachable=0, parent_hint=a.get("prefer_parent"),
                                last_error="not in the router's managed node list (cfg_device_list)",
                                macs=json.dumps(sorted({unit_mac, *backhaul.get(unit_mac, {}).values()})))
 
