@@ -4,6 +4,8 @@ A running log of agreed decisions (lightweight ADRs). Newest first.
 
 | # | Date | Decision | Why / consequences |
 |---|---|---|---|
+| D-26 | 2026-11-13 | **UniFi switch is managed from the UniFi app** (no local UniFi Network controller found). Data comes from the switch's own SSH (`mca-dump`, read-only, device credentials set in the app, stored with DPAPI) or, opt-in, the Ubiquiti Site Manager cloud API with a user-created API key. | No local controller API to rely on; cloud access only with consent. |
+| D-25 | 2026-11-13 | **Keep hourly and daily summaries for 12 months**, in addition to 1 month of raw and per-minute data (D-20). | Long-term trends (ISP, kicks, busyness) survive at a few MB. |
 | D-24 | 2026-11-13 | **Reports** contain: summary of findings, evidence charts, device table; option to anonymise names and MACs for sharing. | Proposal accepted. |
 | D-23 | 2026-11-13 | **Probe screens** (stand-alone): live signal, quick test, air survey summary, monitor status, placement. | Proposal accepted. |
 | D-22 | 2026-11-13 | **Pi-hole and Home Assistant are included** as optional source plug-ins: Pi-hole for per-device DNS queries and latency ("who is chatty", DNS problems), Home Assistant for friendly device names and presence. Not included: Synology, Uptime Kuma. | Confirmed; both already have collectors in `homelab-unified`. |

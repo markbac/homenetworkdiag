@@ -1,6 +1,6 @@
 # Open questions
 
-None open. All questions are answered; see [decisions](10-decisions.md) D-01 to D-24.
+None open. All questions are answered; see [decisions](10-decisions.md) D-01 to D-26.
 
 | Topic | Answer |
 |---|---|
@@ -18,6 +18,7 @@ None open. All questions are answered; see [decisions](10-decisions.md) D-01 to 
 | Dashboard | LAN access from phones/laptops with login |
 | Alerts | None for now |
 | Reports | Findings summary, evidence charts, device table, optional anonymisation |
-| Retention | 1 month |
+| Retention | 1 month raw/per-minute, 12 months of hourly/daily summaries |
+| UniFi switch | Managed from the UniFi app: switch SSH or opt-in cloud API |
 
 New questions found during implementation will be added here.

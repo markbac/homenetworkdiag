@@ -51,7 +51,7 @@ flowchart LR
 | ID | Requirement | Pri |
 |---|---|---|
 | HIS-01 | Everything collected is stored with timestamps: per-minute series (signal, rates, utilisation, throughput, latency, air), events (journeys, kicks, roams, WAN, inventory changes), snapshots (topology, settings, ports, services). | M |
-| HIS-02 | **Retention:** raw and per-minute data for 1 month (D-20). **Proposal:** keep hourly and daily summaries for 12 months (small: a few MB) so long-term trends survive; to confirm. | M |
+| HIS-02 | **Retention:** raw and per-minute data for 1 month (D-20); **hourly and daily summaries for 12 months** (D-25), so long-term trends survive. | M |
 | HIS-03 | **History explorer:** pick a time range and see the network as it was (map time slider, device timelines, charts, findings active then). | M |
 | HIS-04 | **"What changed"** feed: new/gone devices, setting changes on the router, new ports/services, firmware updates, unit online/offline, with diffs. | M |
 | HIS-05 | Export any range as JSONL/CSV, and as a report. | M |
