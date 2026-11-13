@@ -45,10 +45,32 @@ Each requirement has an ID so later design, code and tests can refer to it. **Pr
 | PRB-04 | **Air survey** on a chosen channel (default: the one the probe is joined on; optionally hop through channels): air time by category (your data, broadcast/multicast by kind, mesh backhaul, beacons, management, neighbours), retries, devices active, per-device air time / bytes / signal / rate, top broadcast sources. Headers only, never payloads. | M |
 | PRB-05 | **Quick test** from the probe's location: ping router and internet (avg, max, jitter, loss), DNS, download. | M |
 | PRB-06 | **Monitor** for 15 min to 8 h from the probe: per-minute ping, loss, spikes, signal, roams, DNS, air figures and top devices; events (drop-out with reason, roam, spike, loss burst, busy channel, broadcast flood, device hog). | M |
+| PRB-14 | **Autonomous operation:** probes run their own schedules (scans every minute, air surveys every N minutes, monitors) whether or not the Windows app is running, keep everything locally (SD card if fitted, otherwise a flash ring buffer: about 1 KB per monitored minute, so ~2 MB holds 1.5 days), and the tool syncs all of it when it next connects. Oldest data is dropped only when storage is full, and the probe reports that. | M |
 | PRB-07 | Probes stream results to the tool when it is running and **buffer when it is not** (the tray app is only started when needed); on start, the tool syncs everything since the last record it has (sequence numbers, no duplicates). Monitors scheduled on a probe run without the PC. | M |
 | PRB-08 | A probe can run stand-alone (battery, on its own screen) and sync results later. | S |
 | PRB-09 | Walk-around mode: live signal and quick test at a button press, tagged with a room name, to build a coverage map. | S |
 | PRB-10 | 802.15.4 (Zigbee/Thread) channel energy survey on ESP32-C6/C5, to spot overlap with 2.4 GHz Wi-Fi. | C |
+
+## 3a. Wi-Fi journeys and events (from the access points)
+
+| ID | Requirement | Pri |
+|---|---|---|
+| EVT-01 | Read every unit's log incrementally (main router and every reachable node, MediaTek and Qualcomm formats) and turn lines into typed events: connect, disconnect, **kicked for weak signal** (roaming assistant, with signal values), **steered/roamed** to another unit (candidate unit, signals, result), deauth with reason, backhaul up/down, mesh (cfg) events, DFS, WAN up/down. | M |
+| EVT-02 | Combine events with per-minute client snapshots (which unit, band and SSID each device is on) into a **Wi-Fi journey per device**: a timeline of where it was connected, each move, each kick, gaps while disconnected and how long they lasted. | M |
+| EVT-03 | Detect patterns and raise findings: **kick loops** (kicked > N times/hour), **roam storms** (several roam attempts within a minute), **flapping** devices (connect/disconnect cycles, e.g. every 30 min), **ping-pong** between two units, devices stuck on a far unit, sticky clients that never roam, and devices that keep falling back to 2.4 GHz. | M |
+| EVT-04 | Relate events to symptoms: show on the monitor timeline when a watched device (e.g. a gaming PC) was kicked or moved, next to its ping spikes. | M |
+| EVT-05 | Per device, count kicks, roams, disconnects and time offline per day; rank "least stable devices". | M |
+| EVT-06 | Explain the cause in plain language, e.g. "Kicked 21 times today because its signal fell below the roaming assistant threshold (-70 dBm) on First Floor; it has no closer unit, so it reconnects to the same one." | S |
+| EVT-07 | Recognise USB Wi-Fi adapters and IoT chipsets from the vendor (e.g. ALFA, TP-Link, Espressif, Tuya) and include that in explanations. | S |
+
+## 3b. Network busyness
+
+| ID | Requirement | Pri |
+|---|---|---|
+| BUS-01 | Throughput over time per unit and interface: internet (WAN), each band and SSID, mesh backhaul links, wired ports (from interface counters, sampled every 30 to 60 s). | M |
+| BUS-02 | Per device: data rates (from per-client counters on the APs), active connections (connection tracking), and air time used (probes); "who is using the network right now". | M |
+| BUS-03 | Radio health per band and unit: transmit failure and receive CRC error rates, temperature, noise, rates in use (MediaTek `mwctl stat`, Qualcomm `apstats`/`iwconfig`), with history and thresholds. | M |
+| BUS-04 | Optional: per-device application categories from the router's Traffic Analyzer if the user enables it. | C |
 
 ## 4. Tests and monitoring from Windows
 

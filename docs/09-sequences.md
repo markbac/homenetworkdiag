@@ -183,3 +183,44 @@ stateDiagram-v2
   Resolved --> Open: condition returns
   Verified --> [*]
 ```
+
+## 9. Building a device's Wi-Fi journey (kicks and moves)
+
+```mermaid
+sequenceDiagram
+  participant S as Scheduler
+  participant A as ASUS collector
+  participant U as Each unit (router + nodes)
+  participant J as Journey builder
+  participant R as Rules
+  S->>A: every 60 s
+  A->>U: read new log lines since last offset (syslog.log, syslog.log-1 on rotation)
+  U-->>A: hapdevent Assoc/Disassoc, roamast candidate/roam/kick, deauth, cfg events
+  A->>U: client snapshot (clientlist.json on router; all_sta / wlanconfig per unit)
+  U-->>A: device -> unit, band, SSID, RSSI, rates
+  A->>J: typed events + snapshot
+  J->>J: per device: close/open "connected to unit X on band B" intervals, record kicks, roams, gaps
+  J->>R: journeys, counts per hour
+  R-->>R: kick loop? roam storm? flapping? ping-pong? stuck on far unit? fell back to 2.4 GHz?
+  R->>R: findings with evidence (log lines, signals, times)
+```
+
+## 10. Probe working while the app is closed
+
+```mermaid
+sequenceDiagram
+  participant P as Probe
+  participant F as Probe storage (SD or flash ring)
+  participant E as Engine (tray app)
+  Note over E: app closed
+  loop its own schedule
+    P->>P: scan / air survey / monitor minute
+    P->>F: append record (seq n, placement, time)
+  end
+  Note over E: app started later
+  E->>P: GET /api/sync?since=<last seq stored>
+  P->>F: read records > seq
+  P-->>E: records (paged)
+  E->>E: store, mark gaps (e.g. storage full)
+  E->>P: ack seq (probe may free space)
+```

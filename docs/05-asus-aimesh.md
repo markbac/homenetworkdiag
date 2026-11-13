@@ -66,6 +66,28 @@ Mesh: Second Floor prefers First Floor as its parent (`amas_wlc_target_bssid`); 
 | Roaming and steering | | | `/tmp/syslog.log`: `roamast` (candidate node + RSSI, roam result, "disconnect weak signal strength station"), `hapdevent` Assoc/Disassoc per interface; `/tmp/sta_steer_progress` |
 | DHCP | | | `/var/lib/misc/dnsmasq.leases` |
 
+### Radio health (MediaTek `mwctl dev <if> stat`, main router)
+
+| Band | Tx failures | Rx CRC errors | Temperature | Last rates |
+|---|---|---|---|---|
+| 2.4 GHz `ra0` | **15.7%** | **22.6%** | 53 C | MCS1 / MCS4, 20 MHz |
+| 5 GHz `rai0` | 6.1% | 4.5% | 53 C | NSS1 MCS7, 80 MHz |
+| 6 GHz `rax0` | 2.4% | 0.6% | 50 C | NSS3 MCS10, 320 MHz (backhaul) |
+
+`mwctl stat` also shows proxy ARP **off** and BSS Transition Management (802.11v) on. `mwctl dump radio_stats` / `bss_stats` give only byte counters; neither MediaTek nor the BD4 (`apstats`: "Channel Utilization = DISABLED") exposes channel utilisation on stock firmware, so **channel busy % comes from the probes**.
+
+### Logs: what they hold
+
+| Unit | History in the log | Connects / disconnects | Weak-signal kicks | Roam attempts |
+|---|---|---|---|---|
+| Main router | ~31 h (since 12 Nov 08:47) | 210 / 208 | 67 | 37 |
+| First Floor BT8 | ~3.3 days (since 10 Nov 09:29) | 1,053 / 1,044 | 206 | 112 |
+| Second Floor BD4 | ~1 day (since 12 Nov 17:01) | Qualcomm format (`assoc`/`ASSOC`/`deauth`) | 26 | |
+
+MediaTek lines: `hapdevent: ... ra1: Assoc|Disassoc <mac>`; `roamast: determine candidate node [<bssid>](rssi: -63dbm) for client [<mac>](rssi: -74dbm from client)(rssi: -74dbm from ap) to roam`; `roamast: Roam a client [<mac>], status [0]`; `roamast: [EXAP]Deauth old sta in wl1.1: <mac>, because sta is already connected to <node>`; `roamast: rai1: disconnect weak signal strength station [<mac>]`. The log rotates (`syslog.log` + `syslog.log-1`), so the tool must read it often enough (every minute) to keep a complete history of its own.
+
+Throughput: `/proc/net/dev` sampled twice gives per-interface rates (WAN `ppp0`, SSIDs `ra1..rax1`, backhaul `rax0`/`apcli*`, LAN ports). Connection tracking: ~350 active connections (counts per device to be aggregated on the PC; the router's busybox has no `uniq`).
+
 ### Settings found that matter
 
 | Setting | Value on all bands | Effect |

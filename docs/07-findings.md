@@ -43,12 +43,36 @@ The `f0:23:b9:e` block is registered to Domotz Ltd. The suspicion is that it is 
 - **Two nodes unmanaged:** Office (BD4) and Garden (BD4 Outdoor) are not in the router's managed node list and do not accept SSH; Garden's backhaul links are marked not alive.
 - Correction to section 1: the `28:aa` addresses are the **BT8** units and `c5:99` the **BD4** units.
 
-## 5. Latency symptoms
+## 5. Who gets kicked and who flaps (router logs)
+
+Main router (~31 h) and First Floor (~3.3 days) logs, names from the router's device database, vendors from the IEEE registry:
+
+| Device | Vendor / adapter | Disconnects | Weak-signal kicks | Notes |
+|---|---|---|---|---|
+| Tuya smart device ("lwip0") `e4:ae:e4:58:18:c2` | Tuya | **368** (First Floor) | | Reconnects about every 13 minutes |
+| Phone, private MAC `3a:99:7f:fd:a8:ed` | (randomised) | 196 + 37 | 21+ | Roam storm: attempts every 5 to 10 s |
+| Espressif device `24:d7:eb:e2:91:48` | Espressif | 160 | | |
+| Android phone (android-dhcp-17) | | 138 | 6 | |
+| **Windows PC with ALFA USB Wi-Fi adapter** `00:c0:ca:b0:19:d2` | ALFA | 136 + 57 (two units) | | Moving between First and Second Floor |
+| Android phone (android-dhcp-16) | | 77 + 42 | 7 | |
+| **Windows PC with TP-Link USB Wi-Fi adapter** `0c:ef:15:da:2c:8b` | TP-Link | 74 (Second Floor) | | |
+| Espressif `10:52:1c:0a:aa:a6` | Espressif | 60 | | Every 30 minutes on MH-Pvt_IoT |
+| Laptop UKMANNB10745 | Windows | 18 | 15 | On 6 GHz at -82 dBm |
+| Hisense Roku TV | | 15 | | |
+| CrowPanel (esp32s3-FAD174) | Espressif | 44 (Second Floor) | 4 | Kicked below -70 dBm |
+
+If the two Windows PCs with USB adapters are the gaming PCs, their repeated disconnects and moves between units would explain lag and drop-outs directly.
+
+## 6. Radio health
+
+The main router's 2.4 GHz radio reports 15.7% transmit failures and 22.6% receive CRC errors, against 6.1% / 4.5% on 5 GHz and 2.4% / 0.6% on 6 GHz. The 2.4 GHz SSIDs carried almost no data during the capture (< 0.1 Mbit/s) while the probe measured the channel 50 to 66% busy: the air is used by broadcasts and errors, not traffic.
+
+## 7. Latency symptoms
 
 - Monitor runs (2 to 4 minutes each) showed router ping spikes of 500 to 1,000 ms every minute, a few lost pings, and DNS lookups up to 3.5 s.
 - The panel's signal varied between -65 dBm and -82 dBm depending on which unit it was attached to (it moved between units after restarts).
 
-## 6. Other observations
+## 8. Other observations
 
 - One BD4 node is shown grey in the ASUS app with 0 clients; SSH shows Office and Garden are not managed nodes (section 4).
 - 2.4 GHz clients are mostly IoT: Espressif, Meross, Tuya, Motorola, Amazon, Google, HP printer, TP-Link.
