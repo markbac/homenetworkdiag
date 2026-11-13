@@ -1,6 +1,6 @@
 # Open questions
 
-None open. All questions are answered; see [decisions](10-decisions.md) D-01 to D-26.
+None open. All questions are answered; see [decisions](10-decisions.md) D-01 to D-27.
 
 | Topic | Answer |
 |---|---|
@@ -19,6 +19,6 @@ None open. All questions are answered; see [decisions](10-decisions.md) D-01 to 
 | Alerts | None for now |
 | Reports | Findings summary, evidence charts, device table, optional anonymisation |
 | Retention | 1 month raw/per-minute, 12 months of hourly/daily summaries |
-| UniFi switch | Local UniFi Network controller (on the mini PC) via a View Only account; switch SSH as fallback |
+| UniFi switch | Local UniFi Network controller (on the mini PC) via a local View Only admin without 2FA (D-27); switch SSH as fallback |
 
 New questions found during implementation will be added here.
