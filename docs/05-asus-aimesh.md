@@ -14,6 +14,71 @@ Decisions (see [decisions](10-decisions.md)): stock ASUS firmware, SSH enabled, 
 | Outdoor | ZenWiFi BD4 Outdoor | Node | 4 | Wireless | 2.4 / 5 GHz, Wi-Fi 7 |
 | (unnamed) | ZenWiFi BD4 | Node | 0 | Grey in app (offline?) | 2.4 / 5 GHz, Wi-Fi 7 |
 
+## Verified on this network (13 November 2026)
+
+Read-only capture over SSH (port 1111) of every reachable unit. Raw outputs are kept locally (they contain device names and addresses) and will become parser fixtures.
+
+### Units and what they run
+
+| Unit (ASUS alias) | Model / `productid` | IP | Firmware | Chip family | Wi-Fi interfaces | SSH |
+|---|---|---|---|---|---|---|
+| Main router | ZenWiFi BT8 / `BT8` | 10.0.10.1 | 3.0.0.6.102_58601 (`..._M7EE`) | **MediaTek** (Linux 5.4, aarch64) | `ra0` 2.4, `rai0` 5, `rax0` 6 GHz; SSIDs `ra1-3`, `rai1-3`, `rax1-2`; backhaul client `apcli*` | Yes |
+| First Floor | ZenWiFi BT8 / `BT8` | 10.0.11.29 | same | **MediaTek** | same as main | Yes |
+| Second Floor | ZenWiFi BD4 / `BD4D5` | 10.0.11.14 | 3.0.0.6.102_58396 (`..._Q7PA`) | **Qualcomm** | `ath0` 2.4, `ath1` 5 GHz; SSIDs `ath001-004`, `ath101-104`; `mld0`; backhaul `sta0/sta1` | Yes |
+| Office | ZenWiFi BD4 | not found | | Qualcomm (assumed) | | **No** (not in `cfg_device_list`) |
+| Garden | ZenWiFi BD4 Outdoor | not found | | Qualcomm (assumed) | | **No** (backhaul links `alive:0`) |
+
+Mesh: Second Floor prefers First Floor as its parent (`amas_wlc_target_bssid`); the BT8 pair link over 6 GHz, 320 MHz, EHT-MCS 10, 3 streams (~1.1 Gbit/s, -49 dBm), MLO active. Office and Garden appear in the client data but cannot be reached as managed nodes: the tool should report this.
+
+### Tools present
+
+| Tool | BT8 (MediaTek) | BD4 (Qualcomm) |
+|---|---|---|
+| `wl` (Broadcom) | missing | missing |
+| `iw` | yes, but `station dump` lists only the mesh backhaul peer, and `survey dump` returns zeros | yes |
+| `iwpriv` | "no private ioctls" | yes |
+| `mwctl` (MediaTek) | yes: read commands `dev <if> stat`, `show <param>`, `dump radio_stats`, `dump bss_stats`, `dump sta_stats <mac>`, `dump radio_info`, `dump mlo_info`, `dump con_sta_mld`, `phy <phy> dump band_info` (help warns its output is not stable) | missing |
+| `wlanconfig`, `cfg80211tool`, `apstats`, `athstats`, `wifitool` (Qualcomm) | missing | yes |
+| `hostapd_cli` | **yes: `-i <if> all_sta`** | yes |
+| `iwconfig` | yes | yes (noise floor) |
+| `sqlite3`, `brctl`, `ip`, `arp` | yes | yes |
+| `logread`, `bridge`, `conntrack`, `timeout`, `ethctl` | missing | missing |
+
+### Best source per data item (verified)
+
+| Data | BT8 (MediaTek) | BD4 (Qualcomm) | Any unit |
+|---|---|---|---|
+| Clients per node, band and SSID, with IP and RSSI | | | `/tmp/clientlist.json` (main router: whole mesh) |
+| Clients with interface, auth type, MLO, timestamp | | | `/tmp/allwclientlist.json` (main router) |
+| Wired clients per node | | | `/tmp/wiredclientlist.json` |
+| Device database (name, vendor, type, OS, online, wired/wireless, MLO links, connected since, sources of each field) | | | `/jffs/nmp_cl_json.js` (66 KB, main router) |
+| Per-client signal, tx/rx rate + MCS/NSS/GI, packets, bytes, idle, connected time, flags | `hostapd_cli -i ra1 all_sta` (per SSID interface) | `wlanconfig ath001 list sta` (RSSI current/min/max, rates, idle, assoc time, caps) | |
+| Backhaul link (signal, rate, MCS, retries/failed) | `iw dev rax0 station dump` | `iwconfig sta0/sta1` | |
+| Radio channel, width, tx power | `iw dev` | `iwconfig`, `iw dev` | nvram `wlX_*` |
+| Channel utilisation | `mwctl dev <if> dump radio_stats` (to confirm) | `apstats -R`: utilisation **disabled** on stock firmware | probes |
+| Noise floor | `mwctl` stats (to confirm) | `iwconfig` (-92 to -94 dBm) | |
+| Interface counters | `/proc/net/dev` | `/proc/net/dev` | |
+| Mesh topology, node aliases, backhaul preferences | | | `nvram get cfg_device_list`; `/tmp/<node-mac>.json` (alias e.g. "First Floor", preferred parent, channel plan); `/tmp/relist.json` (backhaul MACs per node); `/tmp/smarthaul.json`; `/tmp/cfgmnt_log.txt` |
+| Channel plans | | | `/tmp/chanspec_all.json`, `chanspec_avbl.json`, `wchannel.json` |
+| Router health | | | `/tmp/sysstate_all.json` (CPU, RAM, uptime averages), `/proc/*` |
+| Wired port status | | | `/tmp/diag_port_status.json` |
+| Wi-Fi counters | | | `/jffs/wlcnt.json` |
+| Roaming and steering | | | `/tmp/syslog.log`: `roamast` (candidate node + RSSI, roam result, "disconnect weak signal strength station"), `hapdevent` Assoc/Disassoc per interface; `/tmp/sta_steer_progress` |
+| DHCP | | | `/var/lib/misc/dnsmasq.leases` |
+
+### Settings found that matter
+
+| Setting | Value on all bands | Effect |
+|---|---|---|
+| IGMP snooping (`wlX_igs`), EMF (`emf_enable`), multicast routing (`mr_enable_x`) | **0 (off)** | All multicast (mDNS, SSDP, IPv6) is flooded to every wireless client: matches the 20% mDNS air time measured |
+| Multicast rate (`wlX_mrate_x`) | 0 (auto) | Broadcasts sent at a low basic rate |
+| Roaming assistant (`wlX_user_rssi`) | **-70 dBm** | Clients below -70 dBm are disconnected ("disconnect weak signal strength station"); seen kicking the CrowPanel and a phone |
+| Smart Connect (`smart_connect_x`) | 3 | Band steering on |
+| Rate set (`wlX_rateset`) | ofdm | 802.11b rates already off |
+| Width (`wlX_bw`), channel | 1 (auto), channel 0 (auto) | 2.4 GHz runs 20 MHz on ch 11; 5 GHz ch 100 80 MHz; 6 GHz ch 85 320 MHz |
+| Guest networks | `MH-Guest` on 2.4 and 5 GHz (all units), 6 GHz guests off | Extra SSID per radio |
+| Hidden SSIDs | `wl0/1/2_ssid` = 32-hex-char names, closed | AiMesh backhaul networks |
+
 ## Chipset matters: detect, do not assume
 
 The BT8 is reported to use **MediaTek** silicon (MT7988 CPU, MT7995/MT7975 radios); the BD4's chipset is not documented. Asuswrt's Wi-Fi tools differ by vendor:

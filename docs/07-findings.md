@@ -34,14 +34,23 @@ Top broadcast sources in survey 4:
 
 The `f0:23:b9:e` block is registered to Domotz Ltd. The suspicion is that it is the **Fingbox**, which monitors presence by ARP-probing every address; on a /23 network (512 addresses) each sweep is twice the size of a typical home network's. Not yet confirmed: the test is to unplug it for 5 minutes and repeat the survey.
 
-## 4. Latency symptoms
+## 4. Router configuration and logs (SSH capture)
+
+- **IGMP snooping is off** on every band of every unit (`wlX_igs=0`, `emf_enable=0`): multicast is flooded to all wireless clients. This matches the 20% of air time measured as mDNS.
+- **Roaming assistant at -70 dBm** disconnects clients whose signal drops below it. The logs show it repeatedly kicking the CrowPanel (10.0.11.141) and making a private-MAC phone (`3a:99:7f:fd:a8:ed`, about -72 dBm on 5 GHz) attempt to roam every 5 to 10 seconds: a roam storm, which feels like lag.
+- An IoT device (`10:52:1c:0a:aa:a6`) on MH-Pvt_IoT connects and disconnects every 30 minutes.
+- **Mixed chipsets:** BT8 units are MediaTek, BD4 units Qualcomm; the collector needs both tool sets (see [ASUS data](05-asus-aimesh.md)).
+- **Two nodes unmanaged:** Office (BD4) and Garden (BD4 Outdoor) are not in the router's managed node list and do not accept SSH; Garden's backhaul links are marked not alive.
+- Correction to section 1: the `28:aa` addresses are the **BT8** units and `c5:99` the **BD4** units.
+
+## 5. Latency symptoms
 
 - Monitor runs (2 to 4 minutes each) showed router ping spikes of 500 to 1,000 ms every minute, a few lost pings, and DNS lookups up to 3.5 s.
 - The panel's signal varied between -65 dBm and -82 dBm depending on which unit it was attached to (it moved between units after restarts).
 
-## 5. Other observations
+## 6. Other observations
 
-- One BD4 node is shown grey in the ASUS app with 0 clients (offline?).
+- One BD4 node is shown grey in the ASUS app with 0 clients; SSH shows Office and Garden are not managed nodes (section 4).
 - 2.4 GHz clients are mostly IoT: Espressif, Meross, Tuya, Motorola, Amazon, Google, HP printer, TP-Link.
 - Download speed from the ESP32 is about 1.2 Mbps (single-antenna, TLS-bound): only for comparing places.
 
