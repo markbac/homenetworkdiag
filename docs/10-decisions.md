@@ -4,8 +4,10 @@ A running log of agreed decisions (lightweight ADRs). Newest first.
 
 | # | Date | Decision | Why / consequences |
 |---|---|---|---|
-| D-22 | 2026-11-13 | **Extra sources (recommended, optional plug-ins):** Pi-hole (per-device DNS queries and latency: "who is chatty", DNS problems) and Home Assistant (friendly device names, presence, which devices matter). Not now: Synology (wired, adds little to Wi-Fi diagnosis), Uptime Kuma (overlaps the tool's own checks). | Highest diagnostic value per effort; both already have collectors in `homelab-unified`. |
-| D-21 | 2026-11-13 | **Name:** repository stays `homenetworkdiag`; product name to be chosen (see open questions). | Renaming a repo later is cheap; not blocking. |
+| D-24 | 2026-11-13 | **Reports** contain: summary of findings, evidence charts, device table; option to anonymise names and MACs for sharing. | Proposal accepted. |
+| D-23 | 2026-11-13 | **Probe screens** (stand-alone): live signal, quick test, air survey summary, monitor status, placement. | Proposal accepted. |
+| D-22 | 2026-11-13 | **Pi-hole and Home Assistant are included** as optional source plug-ins: Pi-hole for per-device DNS queries and latency ("who is chatty", DNS problems), Home Assistant for friendly device names and presence. Not included: Synology, Uptime Kuma. | Confirmed; both already have collectors in `homelab-unified`. |
+| D-21 | 2026-11-13 | **Name: MeshLens.** The repository stays `homenetworkdiag`. | Confirmed. |
 | D-20 | 2026-11-13 | **Data retention: 1 month** for raw records and per-minute history; findings, device history and reports kept longer. | ~55 devices x per-minute samples fits comfortably in SQLite on the mini PC. |
 | D-19 | 2026-11-13 | **Reports** can be generated (HTML/PDF, shareable with an ISP or a forum); **no alerts** for now. | Alerts can be added later on top of findings. |
 | D-18 | 2026-11-13 | **Dashboard reachable from phones and laptops on the LAN**, with a login; not just localhost. | The web UI binds to the LAN interface with authentication and rate-limited login. |

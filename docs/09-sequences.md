@@ -5,12 +5,12 @@
 ```mermaid
 sequenceDiagram
   actor U as User
-  participant T as Tray app
+  participant T as MeshLens tray app
   participant E as Engine
   participant DB as SQLite / JSONL
   participant P as Probes
   participant R as ASUS units
-  U->>T: Start homenetworkdiag
+  U->>T: Start MeshLens
   T->>E: start engine
   E->>DB: open, migrate schema
   E->>E: load settings, rules, IEEE cache

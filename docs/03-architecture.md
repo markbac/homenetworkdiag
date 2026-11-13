@@ -6,10 +6,10 @@ C4 diagrams (context, containers, components), deployment, data model and the ma
 
 ```mermaid
 C4Context
-  title homenetworkdiag - system context
+  title MeshLens - system context
   Person(admin, "Household admin", "Runs diagnostics, reads findings, moves probes")
   Person(family, "Family", "Reports lag; may run a quick test from a probe's screen")
-  System(hnd, "homenetworkdiag", "Windows tray app + ESP32 probes: finds why the network is slow and what to change")
+  System(hnd, "MeshLens", "Windows tray app + ESP32 probes: finds why the network is slow and what to change")
   System_Ext(asus, "ASUS AiMesh", "BT8 router + BT8/BD4 nodes; stock firmware; SSH :1111 and web API")
   System_Ext(lan, "Home devices", "~55 phones, consoles, PCs, TVs, IoT on 10.0.10.0/23")
   System_Ext(inet, "Internet test targets", "1.1.1.1, DNS resolvers, speed test servers")
@@ -26,7 +26,7 @@ C4Context
 
 ```mermaid
 C4Container
-  title homenetworkdiag - containers
+  title MeshLens - containers
   Person(admin, "Household admin")
   System_Boundary(pc, "Windows PC") {
     Container(tray, "Tray launcher", "Python, pystray", "Starts/stops the engine, shows status, opens the dashboard")
@@ -68,6 +68,7 @@ C4Component
     Component(probe, "Probe manager", "new", "mDNS/UDP discovery, adoption, placements, control, sync, health")
     Component(tests, "Tests and monitors", "reused methods", "Ping/jitter/loss, DNS matrix, bufferbloat, speed, device monitors")
     Component(wire, "Wire listener", "optional, Npcap", "Broadcast/multicast counts per source on the LAN")
+    Component(plug, "Source plug-ins", "reused", "Pi-hole (DNS per device), Home Assistant (names, presence)")
     Component(store, "Store", "reused db layer", "SQLite schema + migrations, JSONL writer, retention")
     Component(rules, "Rule engine", "new, YAML rules", "Findings with evidence and recommendations")
     Component(api, "Local API + web server", "aiohttp", "REST, server-sent events, static UI, auth for LAN mode")
@@ -82,6 +83,7 @@ C4Component
   Rel(probe, store, "scans, surveys, minutes, events")
   Rel(tests, store, "results")
   Rel(wire, store, "broadcast counts")
+  Rel(plug, store, "DNS stats, names, presence")
   Rel(store, rules, "series")
   Rel(rules, store, "findings")
   Rel(api, store, "queries")
@@ -95,9 +97,9 @@ C4Component
 flowchart TB
   subgraph house["House LAN 10.0.10.0/23"]
     subgraph pc["Always-on Windows mini PC"]
-      tray["Tray app<br/>homenetworkdiag.exe"]
+      tray["Tray app<br/>MeshLens.exe"]
       eng["Engine + web UI<br/>http://localhost:8787"]
-      data["%LOCALAPPDATA%\\homenetworkdiag<br/>db.sqlite, logs\\*.jsonl"]
+      data["%LOCALAPPDATA%\\MeshLens<br/>db.sqlite, logs\\*.jsonl"]
     end
     bt8["BT8 router 10.0.10.1<br/>SSH :1111, HTTPS"]
     n1["BT8 node 1F"]

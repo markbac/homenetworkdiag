@@ -1,6 +1,8 @@
-# homenetworkdiag
+# MeshLens
 
-A home network diagnostics tool for Windows that answers one question well: **why is the Wi-Fi slow, glitchy or laggy, and what should I change?**
+*(repository: `homenetworkdiag`)*
+
+**MeshLens** is a home network diagnostics tool for Windows that answers one question well: **why is the Wi-Fi slow, glitchy or laggy, and what should I change?**
 
 It is a **tray app started when needed** with a **web control interface** in the browser, and it **finds ESP32 probes automatically** wherever you place them. It combines three views of the network that are normally looked at separately:
 

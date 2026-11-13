@@ -7,7 +7,7 @@ Each requirement has an ID so later design, code and tests can refer to it. **Pr
 | ID | Requirement | Pri |
 |---|---|---|
 | DEV-01 | Discover every device on the configured LAN subnet(s) (e.g. `10.0.10.0/23`) using ARP, ping sweep, the Windows ARP/neighbour table, mDNS, SSDP and NetBIOS. | M |
-| DEV-10 | Optional sources (D-22): Pi-hole (DNS queries and latency per device) and Home Assistant (friendly names, presence). | S |
+| DEV-10 | Source plug-ins (D-22): **Pi-hole** (DNS queries, blocked queries and latency per device; flags chatty devices and DNS problems) and **Home Assistant** (friendly device names, presence, device areas). Both optional, configured in the web UI. | S |
 | DEV-02 | Merge in the ASUS client list and DHCP leases (see ASUS-*) so devices that are asleep or silent still appear. | M |
 | DEV-03 | Key devices by MAC address; track IP changes, first seen, last seen, online/offline history. | M |
 | DEV-04 | Identify each device: hostname (DHCP, mDNS, NetBIOS, reverse DNS), vendor (IEEE registry, looked up locally), type (phone, console, TV, camera, plug, NAS...), using the classification rules from `homelab-unified`. | M |
