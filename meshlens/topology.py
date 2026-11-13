@@ -14,6 +14,8 @@ from __future__ import annotations
 import time
 from typing import Any
 
+from .names import display_name
+
 
 def _tail(mac: str) -> str:
     return mac[3:] if mac else ""
@@ -97,7 +99,14 @@ def build(units: list[dict[str, Any]], devices: list[dict[str, Any]], stations: 
             continue
         parent, link = router["mac"], {"type": "unknown"}
         bh = [latest[m] for m in (u.get("macs") or []) if m in latest and unit_of(latest[m]["unit"]) != u["mac"]]
-        if bh:
+        reported = [b for b in (u.get("backhaul") or []) if now - (b.get("ts") or 0) < 1800 and unit_of(b["parent"])]
+        if reported:
+            # Best link first: 6 > 5 > 2.4 GHz, then signal. A node may use several bands (or parents) at once.
+            reported.sort(key=lambda b: (-float(b["band"] or 0), -(b["rssi"] if b["rssi"] is not None else -999)))
+            parent = unit_of(reported[0]["parent"]) or router["mac"]
+            link = {"type": "wireless", "band": reported[0]["band"], "rssi": reported[0]["rssi"],
+                    "bands": [{"band": b["band"], "rssi": b["rssi"], "parent": unit_of(b["parent"])} for b in reported]}
+        elif bh:
             s = max(bh, key=lambda x: x["ts"])
             parent = unit_of(s["unit"]) or router["mac"]
             link = {"type": "wireless", "band": s.get("band"), "rssi": s.get("rssi"), "tx_rate": s.get("tx_rate"),
@@ -125,7 +134,7 @@ def build(units: list[dict[str, Any]], devices: list[dict[str, Any]], stations: 
         online = bool(s) or (d.get("last_seen") and now - d["last_seen"] < 900)
         if not online:
             continue
-        label = d.get("user_name") or d.get("name") or mac
+        label = display_name(d, mac)
         common = {"mac": mac, "ip": d.get("ip"), "dtype": d.get("user_type") or d.get("dtype"),
                   "vendor": d.get("vendor"), "watched": d.get("watched"),
                   "health": (dev_health.get(mac) or {}).get("score")}

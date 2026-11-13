@@ -84,8 +84,8 @@ def analyse(events: Iterable[dict[str, Any]], samples: Iterable[dict[str, Any]],
         return unit_name.get(mac or "", mac or "?")
 
     def dname(mac: str) -> str:
-        d = devs.get(mac) or {}
-        return d.get("user_name") or d.get("name") or mac
+        from .names import display_name
+        return display_name(devs.get(mac), mac)
 
     thresholds = _thresholds(settings, units)
     issues: list[dict[str, Any]] = []

@@ -31,6 +31,8 @@ def split_sections(text: str, marker: str = "@@@ ") -> dict[str, str]:
     """Split batch output into {key: body} on lines starting with ``marker``."""
     out: dict[str, list[str]] = {}
     key = None
+    # Files without a trailing newline (e.g. /tmp/clientlist.json) leave the next marker mid-line: split it off.
+    text = re.sub(r"(?<!\n)" + re.escape(marker) + r"(?=[\w:.\-]+\n)", "\n" + marker, text)
     for line in text.splitlines():
         if line.startswith(marker):
             key = line[len(marker):].strip()
@@ -172,6 +174,9 @@ def parse_allwclientlist(text: str) -> dict[str, dict[str, Any]]:
                     "unit": norm_mac(unit), "band_key": band_key,
                     "iface": info.get("ifname"), "auth": info.get("wifi_auth"),
                     "mlo": bool(info.get("mlo_active")), "ts": info.get("ts"),
+                    # Wi-Fi 7 devices: per-link MAC here, the MLD MAC is the one with the IP and DHCP name.
+                    "mld": (norm_mac(info["mld_mac"]) if info.get("mld_mac") and
+                            norm_mac(info["mld_mac"]) not in ("00:00:00:00:00:00", norm_mac(mac)) else None),
                 }
     return out
 

@@ -69,10 +69,12 @@ def mdns_browse(seconds: float = BROWSE_SECONDS) -> dict[str, dict[str, Any]]:
             for ip in info.parsed_addresses():
                 if ":" in ip:
                     continue
-                d = out.setdefault(ip, {"names": set(), "services": set(), "model": None, "host": None})
+                d = out.setdefault(ip, {"names": set(), "services": set(), "model": None, "host": None, "friendly": None})
                 d["services"].add(SERVICE_LABELS.get(short, short))
                 d["names"].add(instance)
                 d["host"] = (info.server or "").rstrip(".").removesuffix(".local") or d["host"]
+                # Google Cast and others advertise a friendly name ("Kitchen speaker") in TXT; host names are often hex/UUIDs.
+                d["friendly"] = d.get("friendly") or txt.get("fn") or txt.get("n") or None
                 d["model"] = d["model"] or txt.get("model") or txt.get("md") or txt.get("ty") or txt.get("am")
     finally:
         zc.close()

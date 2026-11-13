@@ -173,14 +173,34 @@ class AsusCollector:
         leases = {l["mac"]: l for l in P.parse_leases(s.get("leases", ""))}
         auth = P.parse_allwclientlist(s.get("allwclientlist", ""))
         unit_macs = set(models) | set(aliases)
-        for c in P.parse_clientlist(s.get("clientlist", "")):
-            if c["mac"] in unit_macs:
+        clients = P.parse_clientlist(s.get("clientlist", ""))
+        # Backhaul: each node's backhaul radios (relist.json) appear as Wi-Fi clients of their parent unit.
+        sta_owner = {sta: node for node, stas in backhaul.items() for sta in stas.values()}
+        links: dict[str, list[dict[str, Any]]] = {}
+        for c in clients:
+            node = sta_owner.get(c["mac"])
+            if node and c.get("band"):
+                links.setdefault(node, []).append({"parent": c["unit"], "band": c["band"], "rssi": c["rssi"], "ts": now})
+        for node in backhaul:
+            db.upsert_unit(node, backhaul=json.dumps(links.get(node, [])))
+        for c in clients:
+            if c["mac"] in unit_macs or c["mac"] in sta_owner:
                 continue
-            fields: dict[str, Any] = {"ip": c["ip"], "wired": 1 if c["wired"] else 0, "unit": c["unit"],
+            fields: dict[str, Any] = {"ip": c["ip"] or (leases.get(c["mac"]) or {}).get("ip"),
+                                      "wired": 1 if c["wired"] else 0, "unit": c["unit"],
                                       "band": c["band"], "randomised": 1 if P.is_randomised(c["mac"]) else 0}
+            mld = None
             if c["mac"] in auth:
                 fields["wifi_auth"] = auth[c["mac"]]["auth"]
+                mld = auth[c["mac"]].get("mld")
             self._enrich(fields, c["mac"], nmp, leases, table)
+            if mld:
+                # Name and address live on the MLD MAC (DHCP); show them on the link MAC the logs use.
+                linked: dict[str, Any] = {}
+                self._enrich(linked, mld, nmp, leases, table)
+                if linked.get("name") and fields.get("name_src") != "dhcp":
+                    fields["name"], fields["name_src"] = linked["name"], f"{linked['name_src']} (Wi-Fi 7 link of {mld})"
+                fields["ip"] = fields.get("ip") or (leases.get(mld) or {}).get("ip")
             db.upsert_device(c["mac"], now, **fields)
         for mac, d in nmp.items():   # devices known to the router but not currently connected
             if not db.device(mac):
@@ -192,12 +212,19 @@ class AsusCollector:
     def _enrich(fields: dict[str, Any], mac: str, nmp: dict[str, Any], leases: dict[str, Any],
                 table: dict[str, str] | None) -> None:
         d = nmp.get(mac)
-        if d and d.get("name"):
+        lease_name = (leases.get(mac) or {}).get("hostname")
+        # ASUS fills "name" with the DHCP vendor class (e.g. "android-dhcp-17", "MSFT 5.0") when it knows
+        # nothing better; the DHCP host name ("Pixel-9a") is more useful, and the vendor class is an OS hint.
+        vc_only = bool(d) and (d.get("name_src") or "").startswith("nmp_vc") or (
+            bool(d) and d.get("name") and d.get("name") == d.get("vendorclass"))
+        if d and d.get("name") and not vc_only:
             fields["name"], fields["name_src"] = d["name"], f"asus:{d.get('name_src') or 'db'}"
-        elif mac in leases and leases[mac].get("hostname"):
-            fields["name"], fields["name_src"] = leases[mac]["hostname"], "dhcp"
+        elif lease_name:
+            fields["name"], fields["name_src"] = lease_name, "dhcp"
+        if d and d.get("vendorclass"):
+            fields["os_hint"] = d["vendorclass"]
         v = oui.vendor(mac, table) if table else None
         if v:
             fields["vendor"], fields["vendor_src"] = v, "ieee"
-        elif d and d.get("vendor"):
+        elif d and d.get("vendor") and d.get("vendor") != d.get("vendorclass"):
             fields["vendor"], fields["vendor_src"] = d["vendor"], "asus"

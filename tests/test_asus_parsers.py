@@ -113,3 +113,29 @@ def test_parse_unit_qualcomm(fixture_text):
     assert r.chip == "qualcomm" and len(r.stations) == 1
     assert {x["iface"] for x in r.radios} == {"ath0", "ath1"}
     assert r.counters["ath0"]["tx_bytes"] == 200
+
+
+def test_file_without_trailing_newline_does_not_swallow_next_section():
+    # Real /tmp/clientlist.json has no final newline, so the next marker lands on the same line.
+    text = ('@@@ clientlist\n{"02:00:00:00:01:64":{"2G_1":{"02:AA:00:00:00:02":{"ip":"10.0.11.6","rssi":"-58"}},'
+            '"wired_mac":{"02:BB:00:00:00:01":{"ip":"10.0.10.203"}}}}@@@ allwclientlist\n{}\n@@@ relist\n{}\n')
+    s = P.split_sections(text)
+    assert set(s) == {"clientlist", "allwclientlist", "relist"}
+    cl = {c["mac"]: c for c in P.parse_clientlist(s["clientlist"])}
+    assert cl["02:aa:00:00:00:02"]["band"] == "2.4" and cl["02:bb:00:00:00:01"]["wired"] is True
+    # A marker-like string inside data is left alone.
+    assert P.split_sections('@@@ log\nsaw @@@ in text here\n')["log"] == "saw @@@ in text here"
+
+
+def test_unit_script_uses_which_not_command_v():
+    from meshlens.collectors.asus.commands import unit_script
+    sc = unit_script(True, False, True)
+    assert "command -v" not in sc            # BusyBox on ASUS firmware has no "command" builtin
+    assert "if which mwctl" in sc and "if which hostapd_cli" in sc and "if which wlanconfig" in sc
+    assert "clientlist.json 2>/dev/null; echo" in sc and 'cat "$f"; echo;' in sc
+
+
+def test_allwclientlist_mld_link():
+    al = P.parse_allwclientlist('{"02:00:00:00:01:64":{"6G_1":{"0A:00:00:00:00:01":{"ifname":"rax1","wifi_auth":"WPA3-SAE",'
+                                '"mld_mac":"0A:00:00:00:00:00","mlo_active":0},"02:AA:00:00:00:03":{"mld_mac":"00:00:00:00:00:00"}}}}')
+    assert al["0a:00:00:00:00:01"]["mld"] == "0a:00:00:00:00:00" and al["02:aa:00:00:00:03"]["mld"] is None

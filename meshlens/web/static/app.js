@@ -35,7 +35,15 @@ function unitName(mac) {
   const u = unitsByMac[mac] || unitByAddr[mac] || unitByTail[mac.slice(3)];
   return u ? (u.alias || u.model || u.mac) : mac;
 }
-function devName(mac) { const d = devicesByMac[mac]; return d ? (d.user_name || d.name || mac) : mac; }
+// Same fallback as meshlens/names.py: an unnamed device is labelled from its OS hint and maker.
+function osLabel(h) { h = (h || "").toLowerCase(); return h.includes("msft") ? "Windows PC" : h.includes("android") ? "Android device" : (h.includes("dhcpcd") || h.includes("udhcp")) ? "Linux device" : null; }
+function displayName(d, mac) {
+  if (!d) return mac;
+  if (d.user_name || d.name) return d.user_name || d.name;
+  const v = (d.vendor || "").split(",")[0].replace(/ Inc\.?$/i, "").trim(), o = osLabel(d.os_hint);
+  return o && v ? `${o} (${v})` : (o || v) ? `${o || v} ${(d.mac || mac).slice(-5)}` : (d.mac || mac);
+}
+function devName(mac) { return displayName(devicesByMac[mac], mac); }
 
 // ---------------------------------------------------------------- login
 async function showLogin() {
@@ -192,7 +200,7 @@ async function loadDevices() {
   $("#dev-count").textContent = `${rows.length} of ${devs.length}`;
   $("#devices-table").innerHTML = "<thead><tr><th>Name</th><th>Type</th><th>IP</th><th>Vendor</th><th>Connection</th><th>Signal</th><th>Rate tx/rx</th><th>Security</th><th>Last seen</th></tr></thead><tbody>" +
     rows.map((d) => { const l = d.live || {};
-      return `<tr data-mac="${esc(d.mac)}"><td>${d.watched ? "&#9733; " : ""}${esc(d.user_name || d.name || d.mac)}${d.randomised ? ' <span class="pill">private MAC</span>' : ""}</td>
+      return `<tr data-mac="${esc(d.mac)}"><td>${d.watched ? "&#9733; " : ""}${esc(displayName(d, d.mac))}${d.randomised ? ' <span class="pill">private MAC</span>' : ""}</td>
       <td class="muted">${esc(d.user_type || d.dtype || "")}</td><td>${esc(d.ip)}</td><td>${esc(d.vendor)}</td>
       <td>${d.wired ? "wired" : (l.band || d.band) ? esc(`${bandLabel(l.band || d.band)} · ${unitName(l.unit || d.unit)}`) : '<span class="muted">LAN</span>'}</td>
       <td class="${rssiClass(l.rssi)}">${l.rssi ?? ""}</td><td>${l.tx_rate != null ? esc(`${l.tx_rate}/${l.rx_rate ?? "?"}`) : ""}</td>
@@ -205,7 +213,7 @@ async function openDevice(mac) {
   const last = d.history[d.history.length - 1] || {};
   const s = d.stability || {}, h = d.health || {};
   $("#drawer-body").innerHTML = `
-    <h2>${esc(d.user_name || d.name || d.mac)} ${h.score != null ? `<span class="score small-score ${scoreClass(h.score)}">${esc(h.score)}</span>` : ""}</h2>
+    <h2>${esc(displayName(d, d.mac))} ${h.score != null ? `<span class="score small-score ${scoreClass(h.score)}">${esc(h.score)}</span>` : ""}</h2>
     <div class="kv">
       <div>MAC</div><div class="mono">${esc(d.mac)}${d.randomised ? " (private / randomised)" : ""}</div>
       <div>IP</div><div>${esc(d.ip)}</div>

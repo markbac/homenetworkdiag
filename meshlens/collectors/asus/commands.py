@@ -43,12 +43,12 @@ def unit_script(main: bool, first_poll: bool, full: bool) -> str:
         'echo "@@@ net_dev"; cat /proc/net/dev',
         f'echo "@@@ log"; cat {log_files} 2>/dev/null | grep -E "{LOG_PATTERN}" | tail -n 3000',
         # MediaTek: radio health per band, stations per SSID interface.
-        'if command -v mwctl >/dev/null 2>&1; then for i in $(nvram get wl_ifnames); do '
+        'if which mwctl >/dev/null 2>&1; then for i in $(nvram get wl_ifnames); do '
         'echo "@@@ mwctl_stat:$i"; mwctl dev $i stat 2>/dev/null; done; fi',
-        'if command -v hostapd_cli >/dev/null 2>&1; then for i in $(ls /sys/class/net | grep -E "^(ra|rai|rax)[0-9]+$"); do '
+        'if which hostapd_cli >/dev/null 2>&1; then for i in $(ls /sys/class/net | grep -E "^(ra|rai|rax)[0-9]+$"); do '
         'case $i in ra0|rai0|rax0) continue;; esac; echo "@@@ sta_hostapd:$i"; hostapd_cli -i $i all_sta 2>/dev/null; done; fi',
         # Qualcomm: stations per VAP.
-        'if command -v wlanconfig >/dev/null 2>&1; then for i in $(ls /sys/class/net | grep -E "^ath[0-9]{3}$"); do '
+        'if which wlanconfig >/dev/null 2>&1; then for i in $(ls /sys/class/net | grep -E "^ath[0-9]{3}$"); do '
         'echo "@@@ sta_wlanconfig:$i"; wlanconfig $i list sta 2>/dev/null; done; fi',
     ]
     if full:
@@ -56,16 +56,16 @@ def unit_script(main: bool, first_poll: bool, full: bool) -> str:
     if main:
         lines += [
             'echo "@@@ cfg_device_list"; nvram get cfg_device_list',
-            'echo "@@@ clientlist"; cat /tmp/clientlist.json 2>/dev/null',
-            'echo "@@@ allwclientlist"; cat /tmp/allwclientlist.json 2>/dev/null',
-            'echo "@@@ wiredclientlist"; cat /tmp/wiredclientlist.json 2>/dev/null',
-            'echo "@@@ relist"; cat /tmp/relist.json 2>/dev/null',
+            'echo "@@@ clientlist"; cat /tmp/clientlist.json 2>/dev/null; echo',
+            'echo "@@@ allwclientlist"; cat /tmp/allwclientlist.json 2>/dev/null; echo',
+            'echo "@@@ wiredclientlist"; cat /tmp/wiredclientlist.json 2>/dev/null; echo',
+            'echo "@@@ relist"; cat /tmp/relist.json 2>/dev/null; echo',
         ]
         if full:
             lines += [
-                'echo "@@@ nmp_clients"; cat /jffs/nmp_cl_json.js 2>/dev/null',
+                'echo "@@@ nmp_clients"; cat /jffs/nmp_cl_json.js 2>/dev/null; echo',
                 'echo "@@@ leases"; cat /var/lib/misc/dnsmasq.leases 2>/dev/null',
-                'for f in /tmp/[0-9A-F][0-9A-F]:*.json; do [ -f "$f" ] && { echo "@@@ node:$(basename $f .json)"; cat "$f"; }; done',
-                'echo "@@@ port_status"; cat /tmp/diag_port_status.json 2>/dev/null',
+                'for f in /tmp/[0-9A-F][0-9A-F]:*.json; do [ -f "$f" ] && { echo "@@@ node:$(basename $f .json)"; cat "$f"; echo; }; done',
+                'echo "@@@ port_status"; cat /tmp/diag_port_status.json 2>/dev/null; echo',
             ]
     return "\n".join(lines) + "\n"

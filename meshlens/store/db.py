@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS devices (
   names TEXT,                     -- JSON {source: name}: dhcp, mdns, netbios, dns, ssdp
   services TEXT,                  -- JSON list of mDNS/SSDP services
   model TEXT, dtype TEXT,         -- detected model, classified type
+  os_hint TEXT,                   -- DHCP vendor class, e.g. MSFT 5.0 (Windows), android-dhcp-17
   last_alive REAL,                -- last answered a ping / ARP
   ports_scanned REAL
 );
@@ -44,7 +45,8 @@ CREATE TABLE IF NOT EXISTS units (
   chip TEXT, firmware TEXT,
   macs TEXT,                      -- JSON list: every radio/BSSID/backhaul address of the unit
   reachable INTEGER, last_seen REAL, last_error TEXT,
-  parent_hint TEXT                -- preferred parent BSSID from the node's own settings
+  parent_hint TEXT,               -- preferred parent BSSID from the node's own settings
+  backhaul TEXT                   -- JSON [{parent, band, rssi, ts}]: this node's backhaul radios seen as clients
 );
 
 CREATE TABLE IF NOT EXISTS station_samples (
@@ -281,6 +283,7 @@ def units() -> list[dict[str, Any]]:
     out = _rows(conn().execute("SELECT * FROM units ORDER BY role DESC, alias"))
     for u in out:
         u["macs"] = json.loads(u["macs"] or "[]")
+        u["backhaul"] = json.loads(u.get("backhaul") or "[]")
     return out
 
 

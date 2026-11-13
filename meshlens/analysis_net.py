@@ -13,6 +13,7 @@ from typing import Any
 
 from .analysis import _issue
 from .collectors.devolo import links
+from .names import display_name
 
 LOCAL_P95_MS = 25        # this PC to the router; wired is ~1 ms, good Wi-Fi under 10 ms
 LOSS_PCT = 1.0
@@ -154,7 +155,7 @@ def net_issues(net: dict[str, Any], devs: dict[str, dict[str, Any]], now: float)
             risky[p["mac"]].append(p)
     for mac, ps in risky.items():
         d = devs.get(mac) or {}
-        name = d.get("user_name") or d.get("name") or mac
+        name = display_name(d, mac)
         out.append(_issue(
             "risky_port", "low", "device", mac, f"{name} has a service worth checking",
             "; ".join(f"port {p['port']} {p.get('service') or ''}: {p['risk']}" for p in ps) + ".",
@@ -168,7 +169,7 @@ def net_issues(net: dict[str, Any], devs: dict[str, dict[str, Any]], now: float)
             d = devs.get(e["mac"]) or {}
             out.append(_issue(
                 "new_open_port", "info", "device", e["mac"],
-                f"New open port on {d.get('user_name') or d.get('name') or e['mac']}",
+                f"New open port on {display_name(d, e['mac'])}",
                 f"Port {det.get('port')} ({det.get('service') or 'unknown service'}) opened, first seen {_hm(e['ts'])}.",
                 "A device started offering a new service: a software update, a setting turned on, or new software.",
                 ["If you didn't expect it, check the device's settings or recent updates."], e["ts"], e["ts"]))

@@ -92,3 +92,30 @@ def test_migration_adds_columns(tmp_path):
     dcols = {r[1] for r in db.conn().execute("PRAGMA table_info(devices)")}
     assert {"last_alive", "names", "dtype", "watched", "user_name"} <= dcols
     db.close()
+
+
+def test_names_prefer_dhcp_over_vendor_class_and_follow_mld(tmp_home):
+    from meshlens.collectors.asus import parsers as P
+    nmp = {"0a:aa:00:00:00:01": {"name": "android-dhcp-17", "vendor": "android-dhcp-17", "vendorclass": "android-dhcp-17",
+                                 "name_src": "nmp_vc_json.js"},
+           "02:aa:00:00:00:09": {"name": "MSFT 5.0", "vendorclass": "MSFT 5.0", "name_src": "nmp_vc_json.js"}}
+    leases = {"0a:aa:00:00:00:01": {"ip": "10.0.11.6", "hostname": "Pixel-9a"},
+              "0a:aa:00:00:00:10": {"ip": "10.0.11.209", "hostname": "Pixel-10-Pro"}}
+    f = {}
+    AsusCollector._enrich(f, "0a:aa:00:00:00:01", nmp, leases, None)
+    assert f["name"] == "Pixel-9a" and f["name_src"] == "dhcp" and f["os_hint"] == "android-dhcp-17" and "vendor" not in f
+    f = {}
+    AsusCollector._enrich(f, "02:aa:00:00:00:09", nmp, {}, None)
+    assert "name" not in f and f["os_hint"] == "MSFT 5.0"   # a vendor class is not a name: left for NetBIOS etc.
+    from meshlens.names import display_name
+    assert display_name({"os_hint": "MSFT 5.0", "vendor": "ALFA, INC."}) == "Windows PC (ALFA)"
+
+    text = ("@@@ identity\nproductid=BT8\n@@@ tools\nmwctl: /usr/sbin/mwctl\n@@@ cfg_device_list\n<ZenWiFi_BT8>10.0.10.1>02:00:00:00:01:64>1\n"
+            '@@@ clientlist\n{"02:00:00:00:01:64":{"6G_1":{"0A:AA:00:00:00:11":{"ip":"","rssi":"-77"}}}}'
+            '@@@ allwclientlist\n{"02:00:00:00:01:64":{"6G_1":{"0A:AA:00:00:00:11":{"ifname":"rax1","wifi_auth":"WPA3-SAE",'
+            '"mld_mac":"0A:AA:00:00:00:10"}}}}\n@@@ leases\n3275 0a:aa:00:00:00:10 10.0.11.209 Pixel-10-Pro *\n')
+    c = AsusCollector(RouterConfig(), tmp_home, runner=lambda *a: text)
+    c.poll("pw", full=True)
+    d = db.device("0a:aa:00:00:00:11")
+    assert d["name"] == "Pixel-10-Pro" and "Wi-Fi 7 link" in d["name_src"] and d["ip"] == "10.0.11.209"
+    assert d["band"] == "6" and d["wifi_auth"] == "WPA3-SAE"
