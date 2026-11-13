@@ -20,26 +20,32 @@ Each requirement has an ID so later design, code and tests can refer to it. **Pr
 
 | ID | Requirement | Pri |
 |---|---|---|
-| ASUS-01 | Read, over SSH and read-only, from the main router: client list (`clientlist`, `custom_clientlist`), DHCP leases, ARP table, per-radio status (channel, chanspec, noise, tx power), associated clients per radio with signal, rates and idle time (`wl assoclist`, `wl sta_info`), interface counters. | M |
-| ASUS-02 | Read the same per-radio and per-client data from every AiMesh node (`cfg_device_list` to find them, then SSH to each). | M |
+| ASUS-00 | Detect each unit's model, firmware and Wi-Fi tool set (Broadcom `wl`, MediaTek `iwpriv`/`mwctl`, mac80211 `iw`) and keep a per-unit capability profile; re-check at every start. | M |
+| ASUS-01 | Collect **everything the units expose, read-only** (full catalogue in [ASUS data](05-asus-aimesh.md)): from the main router client database, DHCP leases, ARP/neighbours, bridge FDB, conntrack, syslog; per band channel/width/DFS, noise, **channel utilisation**, counters, tx power, cached neighbour scan; per client band, node, signal per chain, tx/rx rate, MCS/NSS/width/PHY mode, retries/failures, idle and connected time, MLO links. | M |
+| ASUS-02 | The same radio, client, backhaul, health and counter data from every AiMesh node (BT8 and BD4), found via the mesh topology. | M |
+| ASUS-09 | Use the ASUS web API (`appGet.cgi` hooks, allow-listed) alongside SSH: chipset-independent client list with node/band/RSSI/rates, node list with backhaul, WAN, traffic counters. | M |
+| ASUS-10 | Log in to SSH with a key (the PC's public key added to the router's Authorized Keys); never store the SSH password. | M |
 | ASUS-03 | Build a mesh map: nodes, how they connect (wired / wireless / MLO backhaul), which clients are on which node and band, and node status (online/offline). | M |
 | ASUS-04 | Read wireless settings that affect air time and say what they mean: per-band channel and width, multicast rate, IGMP snooping, guest networks, Smart Connect, legacy (802.11b) support, AiMesh backhaul preference, airtime fairness, roaming assistant thresholds. | S |
 | ASUS-05 | Collect roam events and Wi-Fi disconnects from the router/node logs with reason codes, timestamped. | S |
 | ASUS-06 | Never change router settings in the first release. Commands are an allow-list of read-only commands. | M |
 | ASUS-07 | Store credentials in the Windows Credential Manager (or DPAPI-protected file), never in plain text config. | M |
-| ASUS-08 | Support the ASUS web API as a fallback where SSH is disabled. | C |
+| ASUS-08 | Track settings over time (diff each poll) so "what changed" can be lined up with when problems started. | S |
 
 ## 3. ESP32 radio probes
 
 | ID | Requirement | Pri |
 |---|---|---|
-| PRB-01 | Support one or more ESP32 probes on the LAN, discovered by mDNS and/or configured by IP, each with a name and room. | M |
+| PRB-01 | **Discover probes automatically** (mDNS `_hndprobe._tcp` plus a UDP broadcast beacon every 30 s), list new ones in the web UI, and adopt them with a pairing code shown on the probe's screen. No IP configuration; adopted probes are recognised by id after DHCP changes. | M |
+| PRB-11 | **Placements:** each probe has a current placement (room + spot). The user sets it when moving the probe, on the probe's touch screen (room list synced from the tool) or in the web UI. All results are tagged with the placement; history and comparisons are per room. | M |
+| PRB-12 | Suggest a placement change when a probe's surroundings change (joined a different mesh unit, signal to units changed by > 10 dB, different neighbour set) or after a power cycle. | S |
+| PRB-13 | Wi-Fi provisioning of a new probe without code changes: USB serial from the tool, or the probe's own setup access point. | M |
 | PRB-02 | Probe capabilities reported by the probe (bands, display, battery, firmware version) so the tool adapts to C5 (2.4 + 5 GHz), C6 (2.4 GHz), S3 (2.4 GHz). | M |
 | PRB-03 | **Scan:** all access points per band with SSID, BSSID, channel, width, security, signal, signal history; group BSSIDs into physical radios / mesh units. | M |
 | PRB-04 | **Air survey** on a chosen channel (default: the one the probe is joined on; optionally hop through channels): air time by category (your data, broadcast/multicast by kind, mesh backhaul, beacons, management, neighbours), retries, devices active, per-device air time / bytes / signal / rate, top broadcast sources. Headers only, never payloads. | M |
 | PRB-05 | **Quick test** from the probe's location: ping router and internet (avg, max, jitter, loss), DNS, download. | M |
 | PRB-06 | **Monitor** for 15 min to 8 h from the probe: per-minute ping, loss, spikes, signal, roams, DNS, air figures and top devices; events (drop-out with reason, roam, spike, loss burst, busy channel, broadcast flood, device hog). | M |
-| PRB-07 | Probes stream results to the Windows tool when it is running and buffer (and/or log to SD) when it is not. | S |
+| PRB-07 | Probes stream results to the tool when it is running and **buffer when it is not** (the tray app is only started when needed); on start, the tool syncs everything since the last record it has (sequence numbers, no duplicates). Monitors scheduled on a probe run without the PC. | M |
 | PRB-08 | A probe can run stand-alone (battery, on its own screen) and sync results later. | S |
 | PRB-09 | Walk-around mode: live signal and quick test at a button press, tagged with a room name, to build a coverage map. | S |
 | PRB-10 | 802.15.4 (Zigbee/Thread) channel energy survey on ESP32-C6/C5, to spot overlap with 2.4 GHz Wi-Fi. | C |
@@ -69,7 +75,8 @@ Each requirement has an ID so later design, code and tests can refer to it. **Pr
 
 | ID | Requirement | Pri |
 |---|---|---|
-| UI-01 | Local web dashboard (served by the Windows tool on localhost; optionally LAN): Overview (health + top findings), Devices, Mesh map, Radio (per band/probe), Tests, Monitor timeline, Findings, Probes, Settings. | M |
+| UI-01 | **Web control interface** served by the tray app (localhost by default, LAN with a password as an option): Overview (health + top findings), Devices, Mesh map, Radio (per band/probe), Tests, Monitor timeline, Findings, Probes (adopt, place, start/stop, firmware), Settings. Every action is available here, not only viewing. | M |
+| UI-06 | **Tray app**, started when needed: icon shows status (green / amber findings / red problem / grey collectors paused); menu: Open dashboard, Quick diagnosis, Pause collectors, Quit. Optionally start with Windows. | M |
 | UI-02 | Timeline view: lag spikes, loss, events, channel busy %, top devices and roams on one zoomable time axis. | M |
 | UI-03 | Export a report (HTML/PDF) of a session: findings, charts, device table. | S |
 | UI-04 | All data available as JSON over a local API, and logged as JSON Lines; device table exportable as CSV. | M |
@@ -79,7 +86,7 @@ Each requirement has an ID so later design, code and tests can refer to it. **Pr
 
 | ID | Requirement | Pri |
 |---|---|---|
-| NFR-01 | **Windows 10/11**, no Docker or WSL. Installs per user; admin only where unavoidable (e.g. raw packet capture), and the tool works with reduced features without it. | M |
+| NFR-01 | **Windows 10/11**, no Docker or WSL; **Python 3.12** packaged with PyInstaller, reusing `homelab-unified` code after review. Installs per user; admin only where unavoidable (e.g. raw packet capture), and the tool works with reduced features without it. | M |
 | NFR-02 | **Does not harm the network.** Scans are rate-limited (e.g. ARP sweep paced, not more than N packets/s), never continuous, and the tool reports its own traffic. It must never become the broadcast flood it is looking for. | M |
 | NFR-03 | **Privacy.** Everything stays on the LAN. No device addresses sent to online lookup services (vendor registry is downloaded and searched locally). Probes read frame headers only. | M |
 | NFR-04 | **Security.** Router and probe credentials stored with Windows DPAPI / Credential Manager; dashboard bound to localhost by default; probe API authenticated (shared token). | M |

@@ -17,6 +17,17 @@ Notes:
 - **6 GHz** (used by the BT8s) is not covered by any ESP32. The router's own data (ASUS-*) is the only view of 6 GHz clients.
 - To verify before relying on it: ESP-IDF promiscuous mode on the C5's **5 GHz** band, and how much the C5's 5 GHz scanning disturbs its connection.
 
+## Discovery, adoption and placement
+
+Probes are found automatically and move freely (decisions D-06, D-07):
+
+1. **Provisioning (once per probe):** the probe needs the Wi-Fi name and password. Either the tool sends them over USB serial, or the probe starts its own setup access point and the user enters them on a phone. The password is stored only on the probe.
+2. **Announcing:** on the LAN the probe advertises `_hndprobe._tcp` over mDNS and sends a small UDP broadcast beacon every 30 s (id, chip, bands, firmware, adopted or not). Both are needed: mDNS is sometimes filtered between Wi-Fi and wired segments; the beacon is a fallback. The beacon is tiny (one packet per 30 s), so it does not add to broadcast load.
+3. **Adoption:** the web UI lists new probes; adopting shows a 6-digit code on the probe's screen, which the user types in the web UI. The probe and tool then share a token for all API calls.
+4. **Placement:** the user picks a room and spot (from a list kept by the tool, editable). The probe shows its placement on screen. Every record carries the placement id.
+5. **Moving:** when the probe powers up somewhere new, or sees different surroundings (different mesh unit, unit signals changed by > 10 dB, different neighbour networks), it asks "Moved? Pick room" on its screen and the web UI shows a prompt. Results from the new place are never mixed with the old room's history.
+6. **Tool closed:** probes keep running scheduled monitors and buffer records (RAM ring; SD card where fitted). When the tray app starts it syncs from each probe's last sequence number.
+
 ## Capabilities per probe
 
 | Capability | S3 (CrowPanel) | C6 | C5 |
@@ -42,7 +53,10 @@ The `esp32/weather-display` firmware is the reference implementation; the probe 
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/info` | Chip, bands, firmware, battery, uptime, Wi-Fi status, capabilities |
+| GET | `/api/info` | Chip, bands, firmware, battery, uptime, Wi-Fi status, capabilities, adoption state, placement |
+| POST | `/api/adopt`, `/api/adopt/confirm` | Pairing: show code, confirm, return token |
+| POST | `/api/placement` | Set room / spot (also settable on the probe's screen) |
+| GET | `/api/sync?since=<seq>` | Everything buffered since a sequence number |
 | GET | `/api/wifi.json?band=` | Scan results with history |
 | POST | `/api/air` | Start an air survey: `band`, `channel` (or `joined`), `seconds` |
 | GET | `/api/air.json` | Last survey: summary, categories, units, devices, broadcast sources |

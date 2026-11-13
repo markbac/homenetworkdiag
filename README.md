@@ -2,7 +2,7 @@
 
 A home network diagnostics tool for Windows that answers one question well: **why is the Wi-Fi slow, glitchy or laggy, and what should I change?**
 
-It combines three views of the network that are normally looked at separately:
+It is a **tray app started when needed** with a **web control interface** in the browser, and it **finds ESP32 probes automatically** wherever you place them. It combines three views of the network that are normally looked at separately:
 
 1. **The wired/IP view** from a Windows PC: which devices are on the network, what they are, who is flooding it, how latency and DNS behave.
 2. **The router's view** from the ASUS AiMesh system: every client, which node and band it is on, signal and link rate, roaming, DHCP, radio settings.
@@ -16,12 +16,14 @@ It combines three views of the network that are normally looked at separately:
 |---|---|
 | [Goals and scope](docs/01-goals.md) | The problem, who it is for, what is in and out of scope |
 | [Requirements](docs/02-requirements.md) | Numbered functional and non-functional requirements |
-| [Architecture](docs/03-architecture.md) | Proposed components, data flow, storage, UI |
+| [Architecture](docs/03-architecture.md) | C4 context / container / component diagrams, deployment, data model |
 | [ESP32 probes](docs/04-esp32-probes.md) | Probe hardware, roles, capabilities, probe API |
 | [ASUS AiMesh data](docs/05-asus-aimesh.md) | What can be read from the router and nodes, and how |
 | [Reuse](docs/06-reuse.md) | What to take from `homelab-unified` and the `esp32` weather-display firmware |
 | [Findings so far](docs/07-findings.md) | Real measurements from this network that shaped the requirements |
-| [Open questions](docs/08-open-questions.md) | Decisions needed before building |
+| [Open questions](docs/08-open-questions.md) | Decisions still needed |
+| [Sequences and state machines](docs/09-sequences.md) | Start-up, probe discovery and moves, quick diagnosis, monitors, ASUS polling, lifecycles |
+| [Decisions](docs/10-decisions.md) | Agreed decisions (Python, tray app, read-only router, probe discovery and placements...) |
 
 ## Related projects
 

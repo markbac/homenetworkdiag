@@ -1,6 +1,6 @@
 # Open questions
 
-Answers will be folded back into the requirements and architecture.
+Answered questions move to [decisions](10-decisions.md). **Answered so far:** language (Python, reuse), how it runs (tray app when needed), SSH (enabled, port 1111, stock firmware), subnets (one, `10.0.10.0/23`), router writes (read-only), probes move (placements), probe discovery (automatic), web control interface (yes).
 
 ## Platform and packaging
 
