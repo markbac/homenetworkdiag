@@ -19,6 +19,6 @@ None open. All questions are answered; see [decisions](10-decisions.md) D-01 to 
 | Alerts | None for now |
 | Reports | Findings summary, evidence charts, device table, optional anonymisation |
 | Retention | 1 month raw/per-minute, 12 months of hourly/daily summaries |
-| UniFi switch | Managed from the UniFi app: switch SSH or opt-in cloud API |
+| UniFi switch | Local UniFi Network controller (on the mini PC) via a View Only account; switch SSH as fallback |
 
 New questions found during implementation will be added here.
