@@ -4,6 +4,8 @@ Each requirement has an ID so later design, code and tests can refer to it. **Pr
 
 ## 1. Device discovery and inventory
 
+Services, open ports, router exposure, security hygiene, core services and wired topology are specified in [network inventory, services and security](11-network-inventory-and-security.md) (SVC-, PRT-, NAT-, SEC-, ISP-, TOP-).
+
 | ID | Requirement | Pri |
 |---|---|---|
 | DEV-01 | Discover every device on the configured LAN subnet(s) (e.g. `10.0.10.0/23`) using ARP, ping sweep, the Windows ARP/neighbour table, mDNS, SSDP and NetBIOS. | M |
