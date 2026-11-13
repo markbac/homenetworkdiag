@@ -26,6 +26,8 @@ It is a **tray app started when needed** with a **web control interface** in the
 | [Open questions](docs/08-open-questions.md) | Decisions still needed |
 | [Sequences and state machines](docs/09-sequences.md) | Start-up, probe discovery and moves, quick diagnosis, monitors, ASUS polling, lifecycles |
 | [Decisions](docs/10-decisions.md) | Agreed decisions (Python, tray app, read-only router, probe discovery and placements...) |
+| [Network inventory, services and security](docs/11-network-inventory-and-security.md) | Beyond Wi-Fi: services (mDNS, UPnP), open ports, router exposure and NAT, security hygiene, DHCP/DNS/ISP health, wired topology |
+| [Topology, history and enrichment](docs/12-topology-history-enrichment.md) | Interactive map, device pages with Wi-Fi details and handovers, history explorer, manual enrichment, feature backlog |
 
 ## Related projects
 

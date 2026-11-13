@@ -79,7 +79,7 @@ sequenceDiagram
     W->>E: set placement
     E->>P: POST /api/placement
   end
-  E->>E: close old placement, open new one; later results tagged with it
+  E->>E: close old placement, open new one, later results tagged with it
 ```
 
 ## 4. Quick diagnosis ("it's laggy right now")
@@ -105,7 +105,7 @@ sequenceDiagram
   end
   E->>E: rules over the session window
   E->>W: findings ranked, with evidence charts
-  W->>U: "Broadcast flood from Fingbox uses 27% of 2.4 GHz air. Xbox is on 2.4 GHz at -71 dBm via Outdoor node; it supports 5 GHz."
+  W->>U: "Broadcast flood from Fingbox uses 27% of 2.4 GHz air. Xbox is on 2.4 GHz at -71 dBm via Outdoor node, it supports 5 GHz."
 ```
 
 ## 5. Evening monitor while the PC app may close
@@ -141,7 +141,7 @@ sequenceDiagram
   participant DB as Store
   S->>A: every 60 s
   A->>R: web API: get_clientlist(), get_cfg_clientlist()
-  R-->>A: clients with node, band, rssi, rates; nodes with backhaul
+  R-->>A: clients with node, band, rssi, rates, nodes with backhaul
   A->>R: SSH: per-band station stats, utilisation, /proc/net/dev, new syslog lines
   loop each online node
     A->>N: SSH: per-band station stats, utilisation, backhaul link, counters
@@ -196,7 +196,7 @@ sequenceDiagram
   S->>A: every 60 s
   A->>U: read new log lines since last offset (syslog.log, syslog.log-1 on rotation)
   U-->>A: hapdevent Assoc/Disassoc, roamast candidate/roam/kick, deauth, cfg events
-  A->>U: client snapshot (clientlist.json on router; all_sta / wlanconfig per unit)
+  A->>U: client snapshot (clientlist.json on router, all_sta / wlanconfig per unit)
   U-->>A: device -> unit, band, SSID, RSSI, rates
   A->>J: typed events + snapshot
   J->>J: per device: close/open "connected to unit X on band B" intervals, record kicks, roams, gaps

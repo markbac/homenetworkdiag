@@ -4,6 +4,8 @@ A running log of agreed decisions (lightweight ADRs). Newest first.
 
 | # | Date | Decision | Why / consequences |
 |---|---|---|---|
+| D-26 | 2026-11-13 | **UniFi data comes from the local UniFi Network controller API** (9.1.120, running on the same mini PC, ports 8080/8443), using a **View Only** local admin created for MeshLens (credentials stored with DPAPI). Fallback: the switch's own SSH (`mca-dump`, device SSH authentication is enabled in the controller as `streakyb`). | Controller already aggregates port stats, PoE, LLDP and client-to-port mapping; read-only role enforces D-04-style safety. |
+| D-25 | 2026-11-13 | **Keep hourly and daily summaries for 12 months**, in addition to 1 month of raw and per-minute data (D-20). | Long-term trends (ISP, kicks, busyness) survive at a few MB. |
 | D-24 | 2026-11-13 | **Reports** contain: summary of findings, evidence charts, device table; option to anonymise names and MACs for sharing. | Proposal accepted. |
 | D-23 | 2026-11-13 | **Probe screens** (stand-alone): live signal, quick test, air survey summary, monitor status, placement. | Proposal accepted. |
 | D-22 | 2026-11-13 | **Pi-hole and Home Assistant are included** as optional source plug-ins: Pi-hole for per-device DNS queries and latency ("who is chatty", DNS problems), Home Assistant for friendly device names and presence. Not included: Synology, Uptime Kuma. | Confirmed; both already have collectors in `homelab-unified`. |

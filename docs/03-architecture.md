@@ -8,9 +8,9 @@ C4 diagrams (context, containers, components), deployment, data model and the ma
 C4Context
   title MeshLens - system context
   Person(admin, "Household admin", "Runs diagnostics, reads findings, moves probes")
-  Person(family, "Family", "Reports lag; may run a quick test from a probe's screen")
+  Person(family, "Family", "Reports lag, may run a quick test from a probe's screen")
   System(hnd, "MeshLens", "Windows tray app + ESP32 probes: finds why the network is slow and what to change")
-  System_Ext(asus, "ASUS AiMesh", "BT8 router + BT8/BD4 nodes; stock firmware; SSH :1111 and web API")
+  System_Ext(asus, "ASUS AiMesh", "BT8 router + BT8/BD4 nodes, stock firmware, SSH :1111 and web API")
   System_Ext(lan, "Home devices", "~55 phones, consoles, PCs, TVs, IoT on 10.0.10.0/23")
   System_Ext(inet, "Internet test targets", "1.1.1.1, DNS resolvers, speed test servers")
   System_Ext(ieee, "IEEE registry", "MAC vendor lists, downloaded and cached")
@@ -39,7 +39,7 @@ C4Container
   System_Boundary(probes, "ESP32 probes (mobile)") {
     Container(c5, "C5 probe", "ESP32-C5, Arduino/IDF", "2.4 + 5 GHz scans, air survey, tests, monitors, buffering")
     Container(c6, "C6 probe", "ESP32-C6", "2.4 GHz + 802.15.4")
-    Container(panel, "CrowPanel", "ESP32-S3", "Existing weather display; 2.4 GHz probe")
+    Container(panel, "CrowPanel", "ESP32-S3", "Existing weather display, 2.4 GHz probe")
   }
   System_Ext(asus, "ASUS AiMesh")
   Rel(admin, web, "Uses", "HTTP localhost")
@@ -61,7 +61,7 @@ C4Container
 C4Component
   title Diagnostics engine - components
   Container_Boundary(engine, "Diagnostics engine") {
-    Component(sched, "Scheduler", "asyncio", "Runs jobs on intervals; per-job status, timeouts, back-off")
+    Component(sched, "Scheduler", "asyncio", "Runs jobs on intervals, per-job status, timeouts, back-off")
     Component(disc, "LAN discovery", "reused + Windows APIs", "Paced ARP (SendARP), neighbour table, ping, mDNS, SSDP, NetBIOS")
     Component(enrich, "Enrichment + classification", "reused", "Names, vendor (local IEEE), type, randomised MAC, user overrides")
     Component(asusc, "ASUS collector", "reused router_ssh/node_ssh + web API", "Capability profile, clients, radios, utilisation, logs, settings")
