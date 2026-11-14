@@ -86,3 +86,41 @@ def test_arp_and_relayed_unit_parent():
     n = {x["id"]: x for x in topology.build(units, [], [], [], [], now=1.0)["nodes"]}
     assert n["02:00:00:00:03:e8"]["parent"] == "02:00:00:00:02:48"
     assert n["02:00:00:00:03:e8"]["link"]["type"] == "wireless (through this unit)"
+
+
+CFGMNT = ('{"role":"master","mac":"02:00:00:00:01:64","client_list":['
+          '{"alias":"Main","model_name":"ZenWiFi_BT8","ip":"10.0.10.1","mac":"02:00:00:00:01:64","online":1,"level":0},'
+          '{"alias":"Office","model_name":"ZenWiFi_BD4","ip":"10.0.11.18","mac":"02:00:00:00:02:48","online":0,"level":0},'
+          '{"alias":"Garden","model_name":"ZenWiFi_BD4_Outdoor","product_id":"BD4_OD","fwver":"3.0.0.6.102_58451",'
+          '"ip":"10.0.11.133","mac":"02:00:00:00:03:E8","online":1,"rssi2g":"-60","rssi5g":"-62","level":-1}]}')
+
+
+def test_cfgmnt_parse():
+    c = P.parse_cfgmnt("@junk\n" + CFGMNT)
+    g = c["02:00:00:00:03:e8"]
+    assert g["alias"] == "Garden" and g["online"] and g["level"] == -1 and g["rssi5g"] == -62 and g["productid"] == "BD4_OD"
+    assert c["02:00:00:00:02:48"]["online"] is False and P.parse_cfgmnt("not json") == {}
+
+
+def test_unlisted_online_node_is_tried_and_explained(tmp_home, fixture_text):
+    from meshlens.collectors.asus.ssh import SshError
+    router = fixture_text("asus/router_mediatek.txt").replace("@@@ cfg_device_list\n<ZenWiFi_BT8>10.0.10.1>02:00:00:00:01:64>1",
+                                                              "@@@ cfg_device_list\n<ZenWiFi_BT8>10.0.10.1>02:00:00:00:01:64>1")
+    router += "\n@@@ cfgmnt\n" + CFGMNT + "\n"
+    tried = []
+
+    def runner(host, port, user, pw, script, timeout):
+        tried.append(host)
+        if host == "10.0.10.1":
+            return router
+        raise SshError(f"{host}:{port}: Unable to connect to port {port}")
+    c = AsusCollector(RouterConfig(), tmp_home, runner=runner)
+    c.poll("pw", full=True)
+    assert "10.0.11.133" in tried                              # the unlisted but online node is tried
+    garden = next(u for u in db.units() if u["mac"] == "02:00:00:00:03:e8")
+    assert garden["reachable"] == 0 and "SSH isn't open" in garden["last_error"] and garden["firmware"] == "3.0.0.6.102_58451"
+    assert garden["ip"] == "10.0.11.133" and garden["model"] == "ZenWiFi_BD4_Outdoor"
+    res = analyse([], [], [], db.units(), [], {}, now=1.0)
+    i = next(x for x in res["issues"] if x["subject"] == "02:00:00:00:03:e8")
+    assert i["rule"] == "unit_ssh_closed" and any("Enable SSH" in f for f in i["fixes"])
+    assert res["units"]["02:00:00:00:03:e8"]["score"] is None

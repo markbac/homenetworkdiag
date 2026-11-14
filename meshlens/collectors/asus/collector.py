@@ -109,6 +109,13 @@ class AsusCollector:
         sections = P.split_sections(main_text)
         mesh = P.parse_cfg_device_list(sections.get("cfg_device_list", ""))
         main_mac = next((u["mac"] for u in mesh if u["main"]), "main")
+        # Nodes the mesh controller reports online but cfg_device_list leaves out: try them too.
+        if "cfgmnt" in sections:
+            self.cfgmnt = P.parse_cfgmnt(sections["cfgmnt"])
+        listed = {u["mac"] for u in mesh}
+        for mac, c in (getattr(self, "cfgmnt", None) or {}).items():
+            if mac not in listed and c.get("online") and c.get("ip"):
+                mesh.append({"model": c.get("model"), "ip": c["ip"], "mac": mac, "main": False, "unlisted": True})
         results = [parse_unit(main_text, main_mac, self.cfg.host, True)]
         self.seen_units.add("main")
         for u in mesh:
@@ -118,7 +125,11 @@ class AsusCollector:
                 text = self._run(u["ip"], password, False, u["mac"], full)
                 results.append(parse_unit(text, u["mac"], u["ip"], False))
             except SshError as e:
-                results.append(UnitResult(mac=u["mac"], ip=u["ip"], main=False, ok=False, error=str(e)))
+                err = str(e)
+                if u.get("unlisted"):
+                    err = ("online in the mesh, but SSH isn't open on it, so its settings from the main router "
+                           f"(including SSH) haven't been applied ({err})")
+                results.append(UnitResult(mac=u["mac"], ip=u["ip"], main=False, ok=False, error=err))
             self.seen_units.add(u["mac"])
         self.store(results, mesh, now, full)
         if full:
@@ -176,6 +187,13 @@ class AsusCollector:
                                           "radios": r.radios, "new_events": new})
 
         # Units that appear in the client data but are not managed nodes (e.g. Office, Garden).
+        # Model, firmware, address and the controller's signal reading for every node it knows.
+        # (Only for nodes the live list leaves out: the controller's record can be out of date.)
+        for mac, c in (getattr(self, "cfgmnt", None) or {}).items():
+            if mac == main.mac or (mac in models and not models[mac].get("unlisted")):
+                continue
+            db.upsert_unit(mac, model=c.get("model"), productid=c.get("productid"), firmware=c.get("firmware"),
+                           ip=c.get("ip"), alias=c.get("alias"))
         for unit_mac, a in aliases.items():
             if unit_mac not in models:
                 db.upsert_unit(unit_mac, role="node", alias=a.get("alias"), reachable=0, parent_hint=a.get("prefer_parent"),

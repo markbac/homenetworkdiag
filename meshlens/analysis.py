@@ -255,8 +255,21 @@ def analyse(events: Iterable[dict[str, Any]], samples: Iterable[dict[str, Any]],
             continue
         err = u.get("last_error") or "no answer"
         unmanaged = "cfg_device_list" in err
+        ssh_closed = "SSH isn't open" in err
         via = next((x.get("alias") or x["mac"] for x in units if x["mac"] == u.get("via_unit")), None)
         name = u.get("alias") or u.get("model") or u["mac"]
+        if ssh_closed:
+            issues.append(_issue(
+                "unit_ssh_closed", "medium", "unit", u["mac"], f"MeshLens can't read {name} directly",
+                f"{name} is online in the mesh but SSH is closed on it" + (f"; it connects through {via}" if via else "") + ".",
+                "SSH is a setting the main router sends to every node. This node never applied it (the router's own record "
+                "also leaves it out of the list of synced nodes), so MeshLens can only see it through the router: its "
+                "devices and its link, but not its radios, logs, CPU or memory.",
+                ["Re-send the setting: on the main router's web UI, Administration → System → Enable SSH, click Apply "
+                 "(keep LAN only and the same port).",
+                 "Then restart the node so it re-syncs; MeshLens tries it on every poll and starts reading it by itself.",
+                 "If it still won't sync, check its firmware in the ASUS app, or remove and re-add it."]))
+            continue
         issues.append(_issue(
             "unit_unreachable", "medium" if unmanaged else "medium", "unit", u["mac"],
             f"MeshLens cannot read {name}" if not unmanaged else f"{name} isn't fully synced with the mesh",
@@ -386,7 +399,7 @@ def analyse(events: Iterable[dict[str, Any]], samples: Iterable[dict[str, Any]],
     dev_health = {mac: {"score": scores[mac], "label": _label(scores[mac]), **facts[mac]} for mac in facts}
     unit_health: dict[str, dict[str, Any]] = {}
     for u in units:
-        managed = "cfg_device_list" not in (u.get("last_error") or "")
+        managed = not any(x in (u.get("last_error") or "") for x in ("cfg_device_list", "SSH isn't open"))
         if not managed:
             unit_health[u["mac"]] = {"score": None, "label": None, "note": "not a managed node"}
             continue

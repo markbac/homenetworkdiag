@@ -77,6 +77,9 @@ def unit_script(main: bool, first_poll: bool, full: bool) -> str:
             'echo "@@@ relist"; cat /tmp/relist.json 2>/dev/null; echo',
             # Which hardware address answers for each IP: a unit behind another unit's backhaul radio shows that radio.
             'echo "@@@ arp"; cat /proc/net/arp 2>/dev/null',
+            # The mesh controller's own record of every node (address, model, firmware, online, signal) - it
+            # includes nodes missing from cfg_device_list (e.g. ones whose settings sync is incomplete).
+            'echo "@@@ cfgmnt"; cat /tmp/cfgmnt_log.txt 2>/dev/null; echo',
         ]
         if full:
             lines += [
