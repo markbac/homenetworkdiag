@@ -143,3 +143,11 @@ def test_config_round_trip_and_validation(tmp_home):
     bad = config.from_dict({"network": {"subnets": "10.0.10.0/23, nonsense"}, "devices": [{"kind": "x"}]})
     errs = " ".join(config.validate(bad))
     assert "nonsense" in errs and "needs an address" in errs and "unknown kind" in errs
+
+
+def test_unit_score_not_zeroed_by_many_mass_drops():
+    # 6 separate "many devices dropped" bursts on one unit: penalty is capped, the unit still scores.
+    evs = [ev(5000 - b * 600 + i, "disconnect", f"02:aa:00:00:0{b}:0{i}") for b in range(6) for i in range(5)]
+    res = analyse(evs, [], [], UNITS, [], {}, now=NOW)
+    assert sum(1 for i in res["issues"] if i["rule"] == "mass_drop") == 6
+    assert res["units"][ROUTER]["score"] >= 70
