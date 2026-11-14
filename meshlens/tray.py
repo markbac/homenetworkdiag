@@ -139,4 +139,16 @@ def run(engine: Engine, url: str) -> None:
     )
     icon = pystray.Icon("MeshLens", _icon(COLOURS["none"]), "MeshLens", menu)
     engine.on_quit = lambda: (stop.set(), icon.stop())
-    icon.run(setup=updater)
+    try:
+        icon.run(setup=updater)
+    except OSError as e:
+        # The tray window was destroyed from outside (an installer closing apps, Windows signing out):
+        # shut down quietly instead of crashing.
+        import logging
+        logging.getLogger("meshlens.tray").info("tray window closed from outside (%s); stopping", e)
+    finally:
+        stop.set()
+        try:
+            engine.stop()
+        except Exception:
+            pass
