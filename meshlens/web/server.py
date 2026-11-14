@@ -73,6 +73,8 @@ def build_app(engine: Engine, auth: Auth) -> web.Application:
     r.add_get("/api/graphs", graphs_get)
     r.add_get("/api/units/{mac}/detail", unit_detail)
     r.add_get("/api/hostpc", hostpc_get)
+    r.add_get("/api/export/datasets", export_datasets)
+    r.add_get("/api/export", export_get)
     r.add_get("/api/devices/{mac}/graphs", device_graphs)
     r.add_get("/manifest.webmanifest", manifest)
     r.add_get("/icon-{size:(180|192|512)}.png", icon)
@@ -414,6 +416,46 @@ async def unit_detail(request: web.Request) -> web.Response:
     from .. import unitview
     d = await asyncio.to_thread(unitview.detail, request.match_info["mac"])
     return web.json_response(d) if d else web.json_response({"error": "unknown unit"}, status=404)
+
+
+async def export_datasets(request: web.Request) -> web.Response:
+    from .. import export
+    return web.json_response([{"key": k, "label": v[0], "ranged": v[1] is not None} for k, v in export.DATASETS.items()])
+
+
+async def export_get(request: web.Request) -> web.StreamResponse:
+    """GET /api/export?d=events,signal&from=2026-11-01T00:00&to=2026-11-08T00:00&format=csv|json|zip"""
+    from .. import export
+    q = request.query
+    keys = [k for k in (q.get("d") or "").split(",") if k]
+    if not keys or any(k not in export.DATASETS for k in keys):
+        return web.json_response({"error": "choose datasets: " + ", ".join(export.DATASETS)}, status=400)
+    try:
+        t1 = export.parse_time(q.get("to"), time.time())
+        t0 = export.parse_time(q.get("from"), t1 - 86400)
+    except ValueError as e:
+        return web.json_response({"error": str(e)}, status=400)
+    if t0 >= t1:
+        return web.json_response({"error": "'from' must be before 'to'"}, status=400)
+    fmt = q.get("format", "csv")
+    stamp = time.strftime("%Y%m%d-%H%M", time.localtime(t0)) + "_" + time.strftime("%Y%m%d-%H%M", time.localtime(t1))
+    if fmt == "zip" or len(keys) > 1:
+        body = await asyncio.to_thread(export.zip_file, keys, t0, t1)
+        return web.Response(body=body, content_type="application/zip",
+                            headers={"Content-Disposition": f'attachment; filename="meshlens_{stamp}.zip"'})
+    key = keys[0]
+    ext, ctype, gen = ("json", "application/json", export.json_chunks) if fmt == "json" else ("csv", "text/csv", export.csv_chunks)
+    resp = web.StreamResponse(headers={"Content-Type": f"{ctype}; charset=utf-8",
+                                       "Content-Disposition": f'attachment; filename="meshlens_{key}_{stamp}.{ext}"'})
+    await resp.prepare(request)
+    it = gen(key, t0, t1)
+    while True:
+        chunk = await asyncio.to_thread(lambda: next(it, None))
+        if chunk is None:
+            break
+        await resp.write(chunk)
+    await resp.write_eof()
+    return resp
 
 
 async def hostpc_get(request: web.Request) -> web.Response:

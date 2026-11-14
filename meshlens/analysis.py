@@ -397,7 +397,8 @@ def analyse(events: Iterable[dict[str, Any]], samples: Iterable[dict[str, Any]],
                         sc -= 20
                     elif val is not None and val >= warn:
                         sc -= 8
-            sc -= 15 * sum(1 for i in issues if i["rule"] == "mass_drop" and i["subject"] == u["mac"])
+            # Each "many devices dropped at once" counts, but a busy day can't take the unit to zero on its own.
+            sc -= min(30, 10 * sum(1 for i in issues if i["rule"] == "mass_drop" and i["subject"] == u["mac"]))
             clients = [m for m, f in facts.items() if f["unit"] in [u["mac"], *(u.get("macs") or [])]]
             if clients:
                 share = sum(1 for m in clients if scores[m] < 60) / len(clients)

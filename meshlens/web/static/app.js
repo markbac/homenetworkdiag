@@ -409,6 +409,7 @@ const SECTIONS = [
     { k: "raw_days", label: "Detailed data (days)", type: "number" }, { k: "summary_days", label: "Daily summaries (days)", type: "number" }] },
   { id: "web", title: "Web interface", help: "set-web", note: "Changes take effect after MeshLens restarts (tray icon → Quit, then start it again).", fields: [
     { k: "bind", label: "Listen on", type: "text", hint: "0.0.0.0 = whole LAN, 127.0.0.1 = this PC only" }, { k: "port", label: "Port", type: "number" }] },
+  { id: "export", title: "Export data", help: "export", custom: renderExport },
   { id: "updates", title: "Updates", help: "updates", custom: renderUpdates },
   { id: "status", title: "Status", help: "troubleshooting", custom: renderStatus },
 ];
@@ -537,6 +538,33 @@ async function showPhone() {
     "<p class=\"muted small\">If a phone cannot connect: check it is on the home Wi-Fi (not mobile data or the guest network), and that Windows allowed MeshLens on private networks (the installer option).</p>"
     : "<p class=\"bad\">Could not work out this PC's address on the home network.</p>";
   $("#phone-body").onclick = (ev) => { const b = ev.target.closest("[data-qr]"); if (b) $("#phone-body .qr").src = `/api/connect/qr.svg?i=${b.dataset.qr}`; };
+}
+
+// ---------------------------------------------------------------- export
+async function renderExport(el) {
+  const sets = await api("/api/export/datasets");
+  const iso = (d) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  const now = new Date();
+  el.innerHTML = `<form id="exp-form">
+    <div class="toolbar"><label>From <input type="datetime-local" name="from" value="${iso(new Date(now - 86400000))}"></label>
+      <label>To <input type="datetime-local" name="to" value="${iso(now)}"></label>
+      <span class="small">Quick: <button type="button" class="link" data-range="1">last day</button> · <button type="button" class="link" data-range="7">last week</button>
+        · <button type="button" class="link" data-range="31">last month</button> · <button type="button" class="link" data-range="365">last year</button></span></div>
+    <div class="exp-sets">${sets.map((s) => `<label class="inline"><input type="checkbox" name="d" value="${esc(s.key)}" ${["events", "latency", "speed"].includes(s.key) ? "checked" : ""}> ${esc(s.label)}</label>`).join("")}</div>
+    <p><label class="inline">Format <select name="format"><option value="csv">CSV (Excel)</option><option value="json">JSON</option><option value="zip">ZIP of CSVs</option></select></label>
+      <button type="submit">Download</button> <span id="exp-msg" class="muted small"></span></p>
+    <p class="muted small">Detailed data is kept for ${esc(settingsData.retention.raw_days)} days and daily summaries for ${esc(settingsData.retention.summary_days)} days.
+      Choosing several datasets downloads one ZIP with a CSV each. Device and unit names are added next to MAC addresses.</p></form>`;
+  const f = $("#exp-form");
+  el.querySelectorAll("[data-range]").forEach((b) => (b.onclick = () => { const n = new Date(); f.to.value = iso(n); f.from.value = iso(new Date(n - b.dataset.range * 86400000)); }));
+  f.onsubmit = (ev) => {
+    ev.preventDefault();
+    const d = [...f.querySelectorAll("input[name=d]:checked")].map((x) => x.value);
+    if (!d.length) { $("#exp-msg").textContent = "Choose at least one dataset."; return; }
+    const url = `/api/export?d=${d.join(",")}&from=${encodeURIComponent(f.from.value)}&to=${encodeURIComponent(f.to.value)}&format=${f.format.value}`;
+    const a = document.createElement("a"); a.href = url; a.click();
+    $("#exp-msg").textContent = "Preparing the download…";
+  };
 }
 
 // ---------------------------------------------------------------- updates
