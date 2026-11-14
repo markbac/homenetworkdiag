@@ -31,6 +31,10 @@ async function loadGraphs() {
   C.time($("#gr-air"), { series: g.air, type: "line", unit: "%", yMin: 0, yMax: 100, refLines: [{ y: 50, label: "50% busy" }],
     empty: "Appears once this PC's Wi-Fi card has surveyed the air (every 2 minutes)." });
   C.time($("#gr-lan"), { series: g.lan_noise, type: "line", unit: "/s", empty: "Appears after a couple of minutes." });
+  const U = g.units || {};
+  C.time($("#gr-ucpu"), { series: U.core || {}, type: "line", unit: "%", yMin: 0, yMax: 100, refLines: [{ y: 95, label: "95%" }] });
+  C.time($("#gr-umem"), { series: U.mem || {}, type: "line", unit: "%", yMin: 0, yMax: 100, refLines: [{ y: 90, label: "90%" }] });
+  C.time($("#gr-utemp"), { series: U.temp || {}, type: "line", unit: "°C", refLines: [{ y: 85, label: "85 °C" }] });
   C.time($("#gr-plc"), { series: g.powerline, type: "line", unit: "Mbit/s", refLines: [{ y: 50, label: "50 Mbit/s" }],
     empty: "No powerline adapters read in this period." });
 }

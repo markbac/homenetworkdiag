@@ -168,6 +168,17 @@ def air_util(rows: list[dict[str, Any]], unit_names: dict[str, str]) -> dict[str
     return {k: sorted([t, v] for t, v in d.items()) for k, d in sorted(pts.items())}
 
 
+def unit_series(rows: list[dict[str, Any]], unit_names: dict[str, str]) -> dict[str, dict[str, list]]:
+    """CPU %, busiest core %, memory % and temperature per unit."""
+    out: dict[str, dict[str, list]] = {"cpu": {}, "core": {}, "mem": {}, "temp": {}}
+    for r in rows:
+        n = unit_names.get(r["unit"], r["unit"])
+        for key, col in (("cpu", "cpu_pct"), ("core", "max_core_pct"), ("mem", "mem_used_pct"), ("temp", "temp_c")):
+            if r.get(col) is not None:
+                out[key].setdefault(n, []).append([r["ts"], r[col]])
+    return out
+
+
 def collect(hours: float) -> dict[str, Any]:
     from .store import db
     now = time.time()
@@ -191,6 +202,7 @@ def collect(hours: float) -> dict[str, Any]:
         "heatmap": latency_heatmap(db.ping_minutes(now - 7 * 86400)),
         "powerline": powerline_series(db.plc_rate_history(since), db.plc_adapters()),
         "lan_noise": lan_noise(db.host_lan_since(since)),
+        "units": unit_series(db.unit_samples_since(since), names),
         "air": air_util(db.air_scan_since(since), names),
     }
 

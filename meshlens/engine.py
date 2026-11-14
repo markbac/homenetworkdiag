@@ -86,7 +86,7 @@ class Engine:
             if hit and now - hit[0] < 30:
                 return hit[1]
         since = now - hours * 3600
-        net = {"host_lan": db.host_lan_since(since), "air": db.air_scan_since(max(since, now - 6 * 3600)),
+        net = {"unit_samples": db.unit_samples_since(since), "settings": db.latest_settings(), "host_lan": db.host_lan_since(since), "air": db.air_scan_since(max(since, now - 6 * 3600)),
                "analysis_cfg": self.cfg.analysis, "pings": db.ping_minutes(since), "speeds": db.speed_tests(now - 7 * 86400),
                "unit_names": {u["mac"]: u.get("alias") or u.get("model") or u["mac"] for u in db.units()},
                "plc_adapters": db.plc_adapters(), "plc_rates": db.plc_latest_rates(), "open_ports": db.open_ports(),
@@ -118,6 +118,7 @@ class Engine:
                         for x in self.monitor.live() if x["kind"] in ("router", "internet")],
             "radios": radios,
             "wan_now": {k: (v[-1][1] if v else None) for k, v in wan.items()},
+            "system": {u["mac"]: (u.get("info") or {}).get("system") or {} for u in units},
         }
         return t
 

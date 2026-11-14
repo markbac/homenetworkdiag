@@ -192,6 +192,10 @@ class AnalysisConfig:
     flood_pps: float = 100.0          # broadcast + multicast packets per second reaching the MeshLens PC
     channel_busy_pct: float = 50.0    # an access point's own channel-utilisation report
     crowded_neighbours: int = 3       # other networks heard on the same channel
+    unit_cpu_pct: float = 85.0        # typical CPU busy on a mesh unit
+    unit_mem_pct: float = 90.0        # memory in use
+    unit_temp_c: float = 85.0         # hottest chip sensor
+    conntrack_pct: float = 80.0       # router's connection table
 
 
 @dataclass

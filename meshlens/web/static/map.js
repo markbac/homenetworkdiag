@@ -45,6 +45,8 @@ const MapView = (() => {
       out.push(order.length ? order.map((k) => `${k} ${by[k]}`).join(" · ") : "no devices");
       const bad = (sm.radios || {})[n.id] ? sm.radios[n.id].filter((r) => r.tx_fail_pct != null).sort((a, b) => b.tx_fail_pct - a.tx_fail_pct)[0] : null;
       if (bad) out.push(`radio errors: worst ${bad.band} GHz ${bad.tx_fail_pct}%`);
+      const sy = (sm.system || {})[n.id] || {};
+      if (sy.cpu_pct != null || sy.mem_used_pct != null) out.push(`CPU ${sy.cpu_pct ?? "–"}% (core max ${sy.max_core_pct ?? "–"}%) · mem ${sy.mem_used_pct ?? "–"}%${sy.temp_c ? ` · ${Math.round(sy.temp_c)} °C` : ""}`);
       if (n.kind === "router") { const l = (sm.latency || []).find((x) => x.kind === "router"); if (l) out.push(`ping from MeshLens ${l.avg_ms ?? "–"} ms`); }
       if (n.reachable === 0) out.push("not readable");
       return out;

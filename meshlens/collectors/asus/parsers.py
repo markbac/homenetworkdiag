@@ -117,6 +117,78 @@ def parse_iw_dev(text: str) -> list[dict[str, Any]]:
     return out
 
 
+def parse_proc_stat(text: str) -> dict[str, list[int]]:
+    """``grep '^cpu' /proc/stat`` -> {"cpu": [jiffies...], "cpu0": [...], ...}."""
+    out = {}
+    for line in text.splitlines():
+        p = line.split()
+        if p and p[0].startswith("cpu"):
+            try:
+                out[p[0]] = [int(x) for x in p[1:]]
+            except ValueError:
+                pass
+    return out
+
+
+def cpu_usage(prev: dict[str, list[int]], cur: dict[str, list[int]]) -> dict[str, Any] | None:
+    """Busy % overall and per core between two /proc/stat readings (idle = idle + iowait)."""
+    def busy(a: list[int], b: list[int]) -> tuple[float, float] | None:
+        if len(a) < 5 or len(b) < 5:
+            return None
+        total = sum(b) - sum(a)
+        idle = (b[3] + b[4]) - (a[3] + a[4])
+        soft = (b[6] - a[6]) if len(a) > 6 and len(b) > 6 else 0
+        if total <= 0 or idle < 0:
+            return None
+        return round(100 * (total - idle) / total, 1), round(100 * soft / total, 1)
+    o = busy(prev.get("cpu", []), cur.get("cpu", []))
+    if o is None:
+        return None
+    cores = [busy(prev[k], cur[k]) for k in sorted(cur) if k != "cpu" and k in prev]
+    cores = [c for c in cores if c]
+    return {"cpu_pct": o[0], "softirq_pct": o[1], "cores": [c[0] for c in cores],
+            "max_core_pct": max((c[0] for c in cores), default=o[0])}
+
+
+def parse_meminfo(text: str) -> dict[str, Any]:
+    kv = {}
+    for line in text.splitlines():
+        m = re.match(r"(\w+):\s+(\d+)", line)
+        if m:
+            kv[m.group(1)] = int(m.group(2))
+    total = kv.get("MemTotal")
+    if not total:
+        return {}
+    avail = kv.get("MemAvailable", kv.get("MemFree", 0) + kv.get("Buffers", 0) + kv.get("Cached", 0))
+    return {"mem_total_mb": round(total / 1024), "mem_avail_mb": round(avail / 1024),
+            "mem_used_pct": round(100 * (total - avail) / total, 1)}
+
+
+def parse_thermal(text: str) -> dict[str, Any]:
+    """Thermal zones (millidegrees) -> hottest sensor in °C."""
+    temps = {}
+    for line in text.splitlines():
+        p = line.split()
+        if len(p) == 2 and p[1].lstrip("-").isdigit():
+            v = int(p[1])
+            temps[p[0]] = v / 1000 if abs(v) > 200 else float(v)
+    return {"temp_c": round(max(temps.values()), 1), "temps": temps} if temps else {}
+
+
+def parse_conntrack(text: str) -> dict[str, Any]:
+    nums = [int(x) for x in text.split() if x.isdigit()]
+    return {"conntrack": nums[0], "conntrack_max": nums[1]} if len(nums) >= 2 else {}
+
+
+def parse_df(text: str) -> dict[str, Any]:
+    out = {}
+    for line in text.splitlines()[1:]:
+        p = line.split()
+        if len(p) >= 6 and p[4].endswith("%"):
+            out[{"/jffs": "jffs_pct", "/tmp": "tmp_pct"}.get(p[5], p[5])] = int(p[4][:-1])
+    return {k: v for k, v in out.items() if k in ("jffs_pct", "tmp_pct")}
+
+
 def parse_uptime(text: str) -> dict[str, Any]:
     """``cat /proc/uptime /proc/loadavg``: seconds up, then load averages."""
     lines = [l.split() for l in text.splitlines() if l.strip()]

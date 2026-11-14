@@ -228,6 +228,88 @@ def net_issues(net: dict[str, Any], devs: dict[str, dict[str, Any]], now: float)
                     "Networks on the same channel take turns with yours.",
                     ["Pick a channel with fewer strong neighbours (Router → This PC lists them)."]))
 
+    # ------------------------------------------------ unit CPU, memory, temperature, connections, storage, restarts
+    us = net.get("unit_samples") or []
+    names = net.get("unit_names") or {}
+    if acfg and us:
+        per: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for r in us:
+            per[r["unit"]].append(r)
+        for unit, rs in per.items():
+            name = names.get(unit, unit)
+
+            def med(k: str) -> float | None:
+                v = [r[k] for r in rs if r.get(k) is not None]
+                return statistics.median(v) if len(v) >= 3 else None
+            cpu, core, mem, temp = med("cpu_pct"), med("max_core_pct"), med("mem_used_pct"), med("temp_c")
+            if (cpu is not None and cpu >= acfg.unit_cpu_pct) or (core is not None and core >= 95):
+                one = cpu is not None and cpu < acfg.unit_cpu_pct
+                out.append(_issue(
+                    "unit_cpu_high", "medium", "unit", unit, f"{name}'s processor is very busy",
+                    f"Typical CPU {cpu:.0f}%" + (f", busiest core {core:.0f}%" if core is not None else "") + ".",
+                    ("One core is maxed out: on these units that is usually the core handling network packets, so "
+                     "traffic through the unit queues." if one else
+                     "A busy processor slows routing and Wi-Fi handling for everything on the unit.") +
+                    " Traffic Analyzer, AiProtection and QoS add load on the main router.",
+                    ["Restart the unit if it has been up for weeks.", "Update the firmware (Router tab → settings).",
+                     "If it stays high, turn off router features you don't use (Traffic Analyzer, AiProtection)."]))
+            last = rs[-1]
+            if mem is not None and mem >= acfg.unit_mem_pct:
+                out.append(_issue(
+                    "unit_mem_high", "medium", "unit", unit, f"{name} is low on memory",
+                    f"Typically {mem:.0f}% of memory in use ({last.get('mem_avail_mb')} MB free).",
+                    "When memory runs out the router drops connections or restarts services.",
+                    ["Restart the unit; if it fills up again within days, update the firmware."]))
+            if temp is not None and temp >= acfg.unit_temp_c:
+                out.append(_issue(
+                    "unit_hot", "medium", "unit", unit, f"{name}'s chip is hot ({temp:.0f} °C)",
+                    f"Hottest sensor typically {temp:.0f} °C.", "Hot units throttle and can become unstable.",
+                    ["Give it space and airflow; keep it out of cupboards and direct sun."]))
+            if last.get("conntrack") and last.get("conntrack_max"):
+                pct = 100 * last["conntrack"] / last["conntrack_max"]
+                if pct >= acfg.conntrack_pct:
+                    out.append(_issue(
+                        "conntrack_full", "high", "unit", unit, f"{name}'s connection table is nearly full",
+                        f"{last['conntrack']} of {last['conntrack_max']} connections ({pct:.0f}%).",
+                        "Every connection through the router needs an entry; when the table is full new connections "
+                        "fail (pages hang, games can't connect). A device making huge numbers of connections is the usual cause.",
+                        ["Find the device with the most traffic or connections (file sharing, a misbehaving camera).",
+                         "Restart the router to clear it in the short term."]))
+            for k, label in (("jffs_pct", "settings storage (/jffs)"), ("tmp_pct", "temporary storage (/tmp)")):
+                if (last.get(k) or 0) >= 90:
+                    out.append(_issue(
+                        "unit_storage_full", "low", "unit", f"{unit}-{k}", f"{name}'s {label} is {last[k]}% full",
+                        f"{label}: {last[k]}% used.", "When it fills, logs and settings can't be written.",
+                        ["Restart the unit (clears /tmp); if /jffs stays full, check add-on scripts."]))
+            ups = [(r["ts"], r["uptime_s"]) for r in rs if r.get("uptime_s") is not None]
+            restarts = [t for (t0, u0), (t, u) in zip(ups, ups[1:]) if u < u0]
+            if restarts:
+                out.append(_issue(
+                    "unit_restarted", "medium" if len(restarts) > 1 else "info", "unit", unit,
+                    f"{name} restarted" + (f" {len(restarts)} times" if len(restarts) > 1 else ""),
+                    "Restarted at " + ", ".join(_hm(t) for t in restarts[-5:]) + ".",
+                    "A restart drops every device on the unit for a minute or two. Unplanned restarts point at power, "
+                    "heat, firmware or memory problems.",
+                    ["If you didn't restart it, check its power supply and temperature, and update the firmware."],
+                    restarts[0], restarts[-1], count=len(restarts)))
+
+    # ------------------------------------------------ settings that matter for speed (main router)
+    main = next((u for u, n in names.items() if n == "Main router"), None)
+    s = (net.get("settings") or {}).get(main or "", {})
+    if s.get("webs_state_flag") in ("1", "2"):
+        out.append(_issue("firmware_update", "medium" if s["webs_state_flag"] == "2" else "low", "network", "firmware",
+                          "A router firmware update is available",
+                          f"The router reports a newer firmware{(': ' + s['webs_state_info']) if s.get('webs_state_info') else ''}.",
+                          "Updates fix stability and security problems.",
+                          ["Update from the ASUS app or web UI (Administration → Firmware Upgrade); nodes update with it."]))
+    last_grade = next((x.get("grade") for x in reversed(all_speeds) if x.get("grade")), None)
+    if s and s.get("qos_enable") == "0" and last_grade in ("C", "D", "F"):
+        out.append(_issue("qos_off", "medium", "network", "qos", "QoS is off while bufferbloat is high",
+                          f"Bufferbloat grade {last_grade}; QoS is switched off on the router.",
+                          "QoS is the router feature that keeps latency low when the line is full.",
+                          ["Turn on Adaptive QoS → QoS, type Adaptive or Traditional, and set the bandwidth to about 90% "
+                           "of the router speed test's results."]))
+
     # ------------------------------------------------ open ports
     risky: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for p in net.get("open_ports") or []:
