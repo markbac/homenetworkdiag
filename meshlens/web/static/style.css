@@ -189,3 +189,6 @@ tr.clickrow { cursor: pointer; }
 
 .exp-sets { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 2px 16px; margin: 8px 0; }
 input[type=datetime-local] { padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); }
+
+tr.ev-unit td:first-child { border-left-color: var(--c7); } .ek-unit { background: color-mix(in srgb, var(--c7) 25%, transparent); }
+.legend i.ek.unit { background: var(--c7); }

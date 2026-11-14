@@ -10,6 +10,24 @@ from .names import display_name
 from .store import db
 
 
+def wired_counters(mac: str) -> list[dict[str, Any]]:
+    """Wired interfaces: errors and drops over the last 24 h and since start-up."""
+    from .collectors.asus.parsers import is_wired
+    rows = [c for c in db.iface_counters_since(time.time() - 86400) if c["unit"] == mac and is_wired(c["iface"])
+            and c.get("rx_errs") is not None]
+    by: dict[str, list] = defaultdict(list)
+    for c in rows:
+        by[c["iface"]].append(c)
+    out = []
+    for iface, rs in sorted(by.items()):
+        a, b = rs[0], rs[-1]
+        d = lambda k: max(0, (b.get(k) or 0) - (a.get(k) or 0))
+        out.append({"iface": iface, "rx_errs_24h": d("rx_errs"), "tx_errs_24h": d("tx_errs"), "rx_drop_24h": d("rx_drop"),
+                    "tx_drop_24h": d("tx_drop"), "rx_errs": b.get("rx_errs"), "tx_errs": b.get("tx_errs"),
+                    "carrier_changes": b.get("carrier_changes")})
+    return out
+
+
 def detail(mac: str) -> dict[str, Any] | None:
     now = time.time()
     mac = mac.lower()
@@ -70,6 +88,8 @@ def detail(mac: str) -> dict[str, Any] | None:
         "ifaces": ifaces,
         "radios": [{"iface": k, "band": v.get("band"), **(v.get("data") or {})} for k, v in sorted(radios.items())],
         "ports": settings_info.ports(router.get("info") if router else None, mac),
+        "links": info.get("links") or {},
+        "wired": wired_counters(mac),
         "settings": settings_info.describe(settings) if settings else None,
         "clients": sorted([{"mac": s["mac"], "name": display_name(devs.get(s["mac"]), s["mac"]), "iface": s.get("iface"),
                             "band": s.get("band"), "rssi": s.get("rssi"), "tx_rate": s.get("tx_rate")} for s in clients],

@@ -64,10 +64,15 @@ async function renderUnit(mac) {
 
   <div class="grid">
     <div class="card"><h3>Ports</h3>
-      ${tbl(["Port", "Link", "Speed", "Max"], d.ports.map((p) => `<tr><td>${esc(p.port)}</td>
+      ${tbl(["Port", "Link", "Speed", "Max", "Link changes*"], d.ports.map((p) => `<tr><td>${esc(p.port)}</td>
         <td class="${p.up ? "good" : "muted"}">${p.up ? "connected" : "not connected"}</td>
         <td class="${p.below_max ? "warn" : ""}">${p.link_mbps ? esc(p.link_mbps >= 1000 ? p.link_mbps / 1000 + " Gbit/s" : p.link_mbps + " Mbit/s") : ""}</td>
-        <td class="muted">${esc(p.max_mbps >= 1000 ? p.max_mbps / 1000 + " Gbit/s" : p.max_mbps + " Mbit/s")}</td></tr>`))}
+        <td class="muted">${esc(p.max_mbps >= 1000 ? p.max_mbps / 1000 + " Gbit/s" : p.max_mbps + " Mbit/s")}</td>
+        <td class="${((d.links[p.ifname] || {}).changes || 0) > 2 ? "warn" : ""}">${esc((d.links[p.ifname] || {}).changes ?? "")}</td></tr>`))}
+      ${d.wired.length ? `<h4>Wired interface errors</h4>${tbl(["Interface", "Errors (24 h)", "Drops (24 h)", "Errors since start", "Link changes*"],
+        d.wired.map((w) => `<tr><td class="mono">${esc(w.iface)}</td><td class="${w.rx_errs_24h + w.tx_errs_24h ? "warn" : ""}">${esc(w.rx_errs_24h + w.tx_errs_24h)}</td>
+          <td>${esc(w.rx_drop_24h + w.tx_drop_24h)}</td><td class="muted">${esc((w.rx_errs || 0) + (w.tx_errs || 0))}</td><td>${esc(w.carrier_changes ?? "")}</td></tr>`))}` : ""}
+      <p class="muted small">* Times the link went down/up since the unit started.</p>
       <p class="muted small">Amber speed = the link runs below what the port can do (cable, or the other end is slower).</p></div>
     <div class="card"><h3>Devices on this unit now (${d.clients.length})</h3>
       ${tbl(["Device", "Band", "Signal", "Rate"], d.clients.map((c) => `<tr data-mac="${esc(c.mac)}" class="clickrow"><td>${esc(c.name)}</td>

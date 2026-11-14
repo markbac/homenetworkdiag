@@ -70,6 +70,7 @@ def parse_unit(text: str, mac: str, ip: str, main: bool) -> UnitResult:
         r.settings = P.parse_nvram_kv(s["settings"])
     r.info = {"identity": r.identity, **P.parse_uptime(s.get("uptime", "")), "ifaces": P.parse_iw_dev(s.get("iw_dev", "")),
               "iwconfig": P.parse_iwconfig(s.get("iwconfig", "")), "chip": r.chip}
+    r.info["links"] = P.parse_links(s.get("links", ""))
     if s.get("port_status", "").strip():
         r.info["ports"] = P._json(s["port_status"])
     return r
@@ -85,6 +86,8 @@ class AsusCollector:
         self.seen_units: set[str] = set()   # units already polled once (rotated log read on first poll only)
         self.last_full = 0.0
         self.prev_cpu: dict[str, dict[str, list[int]]] = {}   # last /proc/stat per unit, for CPU %
+        self.prev_links: dict[str, dict[str, dict[str, Any]]] = {}   # carrier_changes per unit/iface
+        self.prev_chan: dict[str, dict[str, tuple]] = {}          # channel/width per unit/band
         self.status: dict[str, Any] = {"last_poll": None, "units": {}, "error": None}
 
     # ------------------------------------------------------------ polling
@@ -158,12 +161,17 @@ class AsusCollector:
                 "ts": now, "unit": r.mac, "iface": rd["iface"], "band": rd.get("band"),
                 "tx_fail_pct": rd.get("tx_fail_pct"), "rx_crc_pct": rd.get("rx_crc_pct"),
                 "temperature": rd.get("temperature"), "noise": rd.get("noise"), "data": json.dumps(rd)} for rd in r.radios])
+            links = P.parse_links(r.sections.get("links", ""))
             db.insert_many("iface_counters", [{
-                "ts": now, "unit": r.mac, "iface": k, "rx_bytes": v["rx_bytes"], "tx_bytes": v["tx_bytes"]}
+                "ts": now, "unit": r.mac, "iface": k, "rx_bytes": v["rx_bytes"], "tx_bytes": v["tx_bytes"],
+                "rx_packets": v.get("rx_packets"), "tx_packets": v.get("tx_packets"), "rx_errs": v.get("rx_errs"),
+                "rx_drop": v.get("rx_drop"), "tx_errs": v.get("tx_errs"), "tx_drop": v.get("tx_drop"),
+                "carrier_changes": (links.get(k) or {}).get("changes")}
                 for k, v in r.counters.items()])
-            new = db.insert_events(r.events)
+            db.insert_events(self._derived_events(r, links, now))
             if r.settings is not None:
                 db.insert_many("unit_settings", [{"ts": now, "unit": r.mac, "data": json.dumps(r.settings)}])
+            new = db.insert_events(r.events)
             jsonl.append(self.data_root, {"type": "asus_unit", "unit": r.mac, "chip": r.chip, "stations": r.stations,
                                           "radios": r.radios, "new_events": new})
 
@@ -219,6 +227,44 @@ class AsusCollector:
                 fields = {"randomised": 1 if P.is_randomised(mac) else 0}
                 self._enrich(fields, mac, nmp, leases, table)
                 db.upsert_device(mac, d.get("conn_ts") or now, **fields)
+
+    def _derived_events(self, r: UnitResult, links: dict[str, dict[str, Any]], now: float) -> list[dict[str, Any]]:
+        """Events MeshLens works out by comparing polls: wired link up/down, channel changes, new internet address."""
+        import hashlib
+        out: list[dict[str, Any]] = []
+
+        def ev(kind: str, iface: str | None, detail: dict[str, Any]) -> None:
+            out.append({"ts": now, "unit": r.mac, "kind": kind, "mac": None, "iface": iface, "detail": detail,
+                        "raw_hash": hashlib.sha1(f"{r.mac}|{kind}|{iface}|{now}".encode()).hexdigest()})
+
+        prev = self.prev_links.get(r.mac)
+        if prev is not None:
+            for iface, l in links.items():
+                p = prev.get(iface)
+                if P.is_wired(iface) and p and l["changes"] > p["changes"]:
+                    ev("link_change", iface, {"changes": l["changes"] - p["changes"], "state": l["state"], "speed": l["speed"]})
+        if links:
+            self.prev_links[r.mac] = links
+        # Channel per band (first interface of each band carries the radio's channel).
+        chans: dict[str, tuple] = {}
+        for i in P.parse_iw_dev(r.sections.get("iw_dev", "")):
+            if i.get("band") and i.get("channel") and i["band"] not in chans and not i["iface"].startswith("apcli"):
+                chans[i["band"]] = (i["channel"], i.get("width"), i["iface"])
+        pc = self.prev_chan.get(r.mac)
+        if pc is not None:
+            for band, (ch, w, iface) in chans.items():
+                if band in pc and (pc[band][0], pc[band][1]) != (ch, w):
+                    ev("channel_change", iface, {"from_channel": pc[band][0], "to_channel": ch, "from_width": pc[band][1],
+                                                 "width": w, "band": band})
+        if chans:
+            self.prev_chan[r.mac] = chans
+        # Internet address change on the main router (read at full polls): the line reconnected.
+        if r.main and r.settings and r.settings.get("wan0_ipaddr"):
+            last = db.latest_settings().get(r.mac) or {}
+            old, new = last.get("wan0_ipaddr"), r.settings["wan0_ipaddr"]
+            if old and new and old != new:
+                ev("wan_ip_change", None, {"from": old, "to": new})
+        return out
 
     def _system(self, r: UnitResult, now: float) -> dict[str, Any]:
         """CPU (from the change since the last poll), memory, temperature, conntrack, storage; stored per poll."""

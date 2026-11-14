@@ -25,7 +25,9 @@ SETTINGS_KEYS = (
 
 TOOLS = ["wl", "iw", "iwpriv", "iwconfig", "mwctl", "hostapd_cli", "wlanconfig", "cfg80211tool", "apstats"]
 
-LOG_PATTERN = "hapdevent|roamast|ieee80211_node_leave|assoc failed with status"
+LOG_PATTERN = ("hapdevent|roamast|ieee80211_node_leave|assoc failed with status"
+               # radar (DFS) detections, forced channel changes, channel re-planning, deliberate restarts
+               "|Radar found|Changing to DFS|trigger acs|current \\[reboot\\]")
 
 
 def _nvram_block(key: str, keys: list[str]) -> str:
@@ -46,6 +48,9 @@ def unit_script(main: bool, first_poll: bool, full: bool) -> str:
         'echo "@@@ thermal"; for z in /sys/class/thermal/thermal_zone*; do echo "$(cat $z/type 2>/dev/null) $(cat $z/temp 2>/dev/null)"; done',
         'echo "@@@ conntrack"; cat /proc/sys/net/netfilter/nf_conntrack_count /proc/sys/net/netfilter/nf_conntrack_max 2>/dev/null',
         'echo "@@@ df"; df -k /jffs /tmp 2>/dev/null',
+        # Per interface: link changes since start-up (carrier_changes), state and speed.
+        'echo "@@@ links"; for i in /sys/class/net/*; do n=${i##*/}; echo "$n $(cat $i/carrier_changes 2>/dev/null) '
+        '$(cat $i/operstate 2>/dev/null) $(cat $i/speed 2>/dev/null)"; done',
         'echo "@@@ iw_dev"; iw dev 2>/dev/null',
         'echo "@@@ iwconfig"; iwconfig 2>/dev/null',
         'echo "@@@ net_dev"; cat /proc/net/dev',

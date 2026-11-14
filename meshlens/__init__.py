@@ -1,3 +1,3 @@
 """MeshLens: home network diagnostics (see docs/ for the specification)."""
 
-__version__ = "0.6.0"
+__version__ = "0.7.0"
