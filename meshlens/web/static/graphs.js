@@ -28,6 +28,9 @@ async function loadGraphs() {
   C.bars($("#gr-rssi"), g.rssi.map((b) => ({ label: `${b.from} to ${b.to} dBm`, short: `${b.from}`, value: b.count,
     color: b.from >= -60 ? "--good" : b.from >= -70 ? "--c5" : b.from >= -78 ? "--warn" : "--bad" })), { empty: "No Wi-Fi devices connected right now." });
   C.time($("#gr-radio"), { series: g.radio_errors, type: "line", unit: "%", refLines: [{ y: 10, label: "10% – interference" }] });
+  C.time($("#gr-air"), { series: g.air, type: "line", unit: "%", yMin: 0, yMax: 100, refLines: [{ y: 50, label: "50% busy" }],
+    empty: "Appears once this PC's Wi-Fi card has surveyed the air (every 2 minutes)." });
+  C.time($("#gr-lan"), { series: g.lan_noise, type: "line", unit: "/s", empty: "Appears after a couple of minutes." });
   C.time($("#gr-plc"), { series: g.powerline, type: "line", unit: "Mbit/s", refLines: [{ y: 50, label: "50 Mbit/s" }],
     empty: "No powerline adapters read in this period." });
 }

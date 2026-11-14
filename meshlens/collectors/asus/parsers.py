@@ -117,6 +117,18 @@ def parse_iw_dev(text: str) -> list[dict[str, Any]]:
     return out
 
 
+def parse_uptime(text: str) -> dict[str, Any]:
+    """``cat /proc/uptime /proc/loadavg``: seconds up, then load averages."""
+    lines = [l.split() for l in text.splitlines() if l.strip()]
+    out: dict[str, Any] = {}
+    try:
+        out["uptime_s"] = int(float(lines[0][0]))
+        out["load"] = [float(x) for x in lines[1][:3]]
+    except (IndexError, ValueError):
+        pass
+    return out
+
+
 # ---------------------------------------------------------------- mesh and clients (router state files)
 
 def parse_cfg_device_list(text: str) -> list[dict[str, Any]]:

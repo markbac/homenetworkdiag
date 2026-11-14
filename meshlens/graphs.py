@@ -148,6 +148,26 @@ def powerline_series(rates: list[dict[str, Any]], adapters: list[dict[str, Any]]
             for (a, b), d in sorted(pair.items())}
 
 
+def lan_noise(rows: list[dict[str, Any]]) -> dict[str, list[list[float]]]:
+    """Broadcast and multicast packets/s reaching the MeshLens PC (per wired adapter)."""
+    out: dict[str, list[list[float]]] = defaultdict(list)
+    for r in rows:
+        tag = r["adapter"]
+        out[f"Broadcast ({tag})"].append([r["ts"], r["bcast_pps"]])
+        out[f"Multicast ({tag})"].append([r["ts"], r["mcast_pps"]])
+    return dict(out)
+
+
+def air_util(rows: list[dict[str, Any]], unit_names: dict[str, str]) -> dict[str, list[list[float]]]:
+    """Channel utilisation each of your access points reports (BSS Load), one line per unit radio."""
+    pts: dict[str, dict[float, int]] = defaultdict(dict)
+    for r in rows:
+        if r.get("own_unit") and r.get("util_pct") is not None:
+            key = f"{unit_names.get(r['own_unit'], r['own_unit'])} {r['band']} GHz ch {r['channel']}"
+            pts[key][r["ts"]] = max(pts[key].get(r["ts"], 0), r["util_pct"])
+    return {k: sorted([t, v] for t, v in d.items()) for k, d in sorted(pts.items())}
+
+
 def collect(hours: float) -> dict[str, Any]:
     from .store import db
     now = time.time()
@@ -170,6 +190,8 @@ def collect(hours: float) -> dict[str, Any]:
         "latency": latency_series(pings),
         "heatmap": latency_heatmap(db.ping_minutes(now - 7 * 86400)),
         "powerline": powerline_series(db.plc_rate_history(since), db.plc_adapters()),
+        "lan_noise": lan_noise(db.host_lan_since(since)),
+        "air": air_util(db.air_scan_since(since), names),
     }
 
 

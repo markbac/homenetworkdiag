@@ -191,21 +191,43 @@ function drawTrend(canvas, days) {
 }
 
 // ---------------------------------------------------------------- devices
+let devSort = { key: "health", dir: 1 };
+const DEV_COLS = [["name", "Name"], ["health", "Health"], ["type", "Type"], ["ip", "IP"], ["vendor", "Vendor"], ["conn", "Connection"],
+  ["rssi", "Signal"], ["rate", "Rate tx/rx"], ["auth", "Security"], ["seen", "Last seen"]];
+
+function fillSelect(sel, values, keepFirst = true) {
+  const el = $(sel), cur = el.value, first = keepFirst ? el.options[0].outerHTML : "";
+  el.innerHTML = first + values.map(([v, l]) => `<option value="${esc(v)}">${esc(l)}</option>`).join("");
+  if ([...el.options].some((o) => o.value === cur)) el.value = cur;
+}
+
 async function loadDevices() {
-  const { devs } = await refreshBase();
+  const { devs, units } = await refreshBase();
+  fillSelect("#dev-unit", units.map((u) => [u.mac, u.alias || u.model || u.mac]));
+  fillSelect("#dev-type", [...new Set(devs.map((d) => d.user_type || d.dtype).filter(Boolean))].sort().map((t) => [t, t]));
   const q = $("#dev-search").value.toLowerCase(), online = $("#dev-online").checked, watched = $("#dev-watched").checked;
+  const unit = $("#dev-unit").value, band = $("#dev-band").value, type = $("#dev-type").value, problems = $("#dev-problems").checked;
   const now = Date.now() / 1000;
+  const unitOf = (d) => { const m = (d.live || {}).unit || d.unit; if (!m) return null; const u = unitsByMac[m] || unitByAddr[m] || unitByTail[m.slice(3)]; return u ? u.mac : m; };
+  const bandOf = (d) => d.wired ? "wired" : ((d.live || {}).band || d.band || "wired");
   const rows = devs.filter((d) => (!online || d.live || (d.wired && now - d.last_seen < 900) || (d.last_alive && now - d.last_alive < 1800))
-    && (!watched || d.watched)
-    && (!q || [d.user_name, d.name, d.ip, d.mac, d.vendor, d.owner, d.room].join(" ").toLowerCase().includes(q)));
+    && (!watched || d.watched) && (!unit || unitOf(d) === unit) && (!band || bandOf(d) === band)
+    && (!type || (d.user_type || d.dtype) === type) && (!problems || (d.health != null && d.health < 80))
+    && (!q || [d.user_name, d.name, d.ip, d.mac, d.vendor, d.owner, d.room, d.model].join(" ").toLowerCase().includes(q)));
+  const key = (d) => { const l = d.live || {};
+    return { name: displayName(d, d.mac).toLowerCase(), health: d.health ?? 101, type: d.user_type || d.dtype || "~", ip: (d.ip || "~").split(".").map((x) => x.padStart(3, "0")).join("."),
+      vendor: (d.vendor || "~").toLowerCase(), conn: bandOf(d) + unitName(unitOf(d)), rssi: l.rssi ?? 0, rate: l.tx_rate ?? -1, auth: d.wifi_auth || "~", seen: -(d.last_seen || 0) }[devSort.key]; };
+  rows.sort((a, b) => { const x = key(a), y = key(b); return (x < y ? -1 : x > y ? 1 : 0) * devSort.dir; });
   $("#dev-count").textContent = `${rows.length} of ${devs.length}`;
-  $("#devices-table").innerHTML = "<thead><tr><th>Name</th><th>Type</th><th>IP</th><th>Vendor</th><th>Connection</th><th>Signal</th><th>Rate tx/rx</th><th>Security</th><th>Last seen</th></tr></thead><tbody>" +
-    rows.map((d) => { const l = d.live || {};
-      return `<tr data-mac="${esc(d.mac)}"><td>${d.watched ? "&#9733; " : ""}${esc(displayName(d, d.mac))}${d.randomised ? ' <span class="pill">private MAC</span>' : ""}</td>
-      <td class="muted">${esc(d.user_type || d.dtype || "")}</td><td>${esc(d.ip)}</td><td>${esc(d.vendor)}</td>
-      <td>${d.wired ? "wired" : (l.band || d.band) ? esc(`${bandLabel(l.band || d.band)} · ${unitName(l.unit || d.unit)}`) : '<span class="muted">LAN</span>'}</td>
+  $("#devices-table").innerHTML = `<thead><tr>${DEV_COLS.map(([k, l]) => `<th data-sort="${k}" class="${devSort.key === k ? (devSort.dir > 0 ? "asc" : "desc") : ""}">${l}</th>`).join("")}</tr></thead><tbody>` +
+    rows.map((d) => { const l = d.live || {}, h = d.health;
+      return `<tr data-mac="${esc(d.mac)}" class="hrow ${h == null ? "" : h >= 80 ? "h-good" : h >= 60 ? "h-warn" : "h-bad"}">
+      <td>${d.watched ? "&#9733; " : ""}${esc(displayName(d, d.mac))}${d.randomised ? ' <span class="pill">private MAC</span>' : ""}</td>
+      <td class="${scoreClass(h)}">${h ?? ""}</td>
+      <td class="muted">${esc(d.user_type || d.dtype || "")}</td><td>${esc(d.ip)}</td><td class="small">${esc(d.vendor)}</td>
+      <td>${d.wired ? "wired" : (l.band || d.band) ? `<span class="pill b${esc(String(l.band || d.band).replace(".", ""))}">${esc(bandLabel(l.band || d.band))}</span> ${esc(unitName(l.unit || d.unit))}` : '<span class="muted">LAN</span>'}</td>
       <td class="${rssiClass(l.rssi)}">${l.rssi ?? ""}</td><td>${l.tx_rate != null ? esc(`${l.tx_rate}/${l.rx_rate ?? "?"}`) : ""}</td>
-      <td>${esc(d.wifi_auth)}</td><td class="muted">${esc(ago(d.last_seen))}</td></tr>`; }).join("") + "</tbody>";
+      <td class="small">${esc(d.wifi_auth)}</td><td class="muted small">${esc(ago(d.last_seen))}</td></tr>`; }).join("") + "</tbody>";
 }
 
 // ---------------------------------------------------------------- device drawer
@@ -229,6 +251,7 @@ async function openDevice(mac) {
     </div>
     ${typeof deviceExtras === "function" ? deviceExtras(d) : ""}
     ${d.issues.length ? "<h3>Issues</h3>" + d.issues.map((i, n) => renderIssue(i, n === 0)).join("") : ""}
+    <p><a href="#" id="dev-events-link">Show this device's Wi-Fi events →</a></p>
     ${deviceGraphsHtml(d.mac)}
     <h3>Journey (handovers, kicks, connects) <button class="help" data-help="journey">?</button></h3>
     <ul class="timeline">${d.journey.slice(-150).reverse().map((j) => `<li class="${esc(j.kind)}"><span class="muted small">${esc(fmtTime(j.ts))}</span>
@@ -250,6 +273,7 @@ async function openDevice(mac) {
     </form>`;
   $("#drawer").hidden = false;
   deviceGraphs(d.mac, 24);
+  $("#dev-events-link").onclick = (ev) => { ev.preventDefault(); showDeviceEvents(d.mac); };
   $("#enrich").onsubmit = async (e) => {
     e.preventDefault();
     const f = new FormData(e.target); const body = Object.fromEntries(f.entries()); body.watched = f.has("watched");
@@ -283,14 +307,35 @@ function drawDaily(canvas, rows) {
 }
 
 // ---------------------------------------------------------------- events
+const EV_CLASS = { kick: "kick", disconnect: "disconnect", leave: "disconnect", connect: "connect", roam_candidate: "roam", roam: "roam",
+  moved_away: "roam", assoc_failed: "assoc_failed" };
+
 async function loadEvents() {
-  await refreshBase();
-  const kind = $("#ev-kind").value, hours = $("#ev-hours").value;
-  const evs = await api(`/api/events?hours=${hours}&limit=1000${kind ? "&kind=" + kind : ""}`);
-  $("#events-table").innerHTML = "<tr><th>Time</th><th>Device</th><th>Event</th><th>Unit</th><th>Band</th><th>Detail</th></tr>" +
-    evs.map((e) => `<tr><td class="muted">${esc(fmtTime(e.ts))}</td><td><a href="#" data-mac="${esc(e.mac)}">${esc(devName(e.mac))}</a></td>
-      <td>${esc(KIND[e.kind] || e.kind)}</td><td>${esc(unitName(e.unit))}</td><td>${esc(e.band ? bandLabel(e.band) : "")}</td>
-      <td class="wrap small">${e.detail.rssi != null ? esc(e.detail.rssi) + " dBm " : ""}${e.detail.target ? "→ " + esc(unitName(e.detail.target)) + " " : ""}${e.detail.new_unit ? "→ " + esc(unitName(e.detail.new_unit)) : ""}${e.detail.status != null ? " status " + esc(e.detail.status) : ""}</td></tr>`).join("");
+  const { devs, units } = await refreshBase();
+  fillSelect("#ev-unit", units.map((u) => [u.mac, u.alias || u.model || u.mac]));
+  $("#ev-devlist").innerHTML = devs.map((d) => `<option value="${esc(displayName(d, d.mac))}">${esc(d.mac)}</option>`).join("");
+  const kind = $("#ev-kind").value, hours = $("#ev-hours").value, unit = $("#ev-unit").value, band = $("#ev-band").value;
+  const q = $("#ev-dev").value.trim().toLowerCase();
+  // An exact device name or MAC asks the server for just that device (so long periods aren't cut off).
+  const exact = q && devs.find((d) => d.mac === q || displayName(d, d.mac).toLowerCase() === q);
+  const evs = await api(`/api/events?hours=${hours}&limit=5000${kind ? "&kind=" + kind : ""}${exact ? "&mac=" + encodeURIComponent(exact.mac) : ""}`);
+  const unitMatch = (m) => { if (!unit) return true; const u = unitsByMac[m] || unitByAddr[m] || unitByTail[(m || "").slice(3)]; return u && u.mac === unit; };
+  const rows = evs.filter((e) => unitMatch(e.unit) && (!band || e.band === band)
+    && (exact || !q || [devName(e.mac), e.mac].join(" ").toLowerCase().includes(q)));
+  $("#ev-count").textContent = `${rows.length} event${rows.length === 1 ? "" : "s"}`;
+  $("#events-table").innerHTML = "<thead><tr><th>Time</th><th>Device</th><th>Event</th><th>Unit</th><th>Band</th><th>Detail</th></tr></thead><tbody>" +
+    rows.map((e) => `<tr class="ev ev-${EV_CLASS[e.kind] || "other"}"><td class="muted small">${esc(fmtTime(e.ts))}</td>
+      <td><a href="#" data-mac="${esc(e.mac)}">${esc(devName(e.mac))}</a></td>
+      <td><span class="evk ek-${EV_CLASS[e.kind] || "other"}">${esc(KIND[e.kind] || e.kind)}</span></td><td>${esc(unitName(e.unit))}</td>
+      <td>${e.band ? `<span class="pill b${esc(String(e.band).replace(".", ""))}">${esc(bandLabel(e.band))}</span>` : ""}</td>
+      <td class="wrap small">${e.detail.rssi != null ? `<span class="${rssiClass(e.detail.rssi)}">${esc(e.detail.rssi)} dBm</span> ` : ""}${e.detail.target ? "→ " + esc(unitName(e.detail.target)) + (e.detail.target_rssi != null ? ` (${esc(e.detail.target_rssi)} dBm) ` : " ") : ""}${e.detail.new_unit ? "→ " + esc(unitName(e.detail.new_unit)) : ""}${e.detail.status != null ? " status " + esc(e.detail.status) : ""}</td></tr>`).join("")
+    + (rows.length ? "" : '<tr><td colspan="6" class="muted">No events match.</td></tr>') + "</tbody>";
+}
+
+function showDeviceEvents(mac) {
+  $("#ev-dev").value = devName(mac);
+  $("#drawer").hidden = true;
+  showTab("events");
 }
 
 // ---------------------------------------------------------------- settings
@@ -338,11 +383,15 @@ const SECTIONS = [
     { k: "extra_targets", label: "Other targets, e.g. a game server (one per line)", type: "list" },
     { k: "include_nodes", label: "Ping each mesh unit", type: "bool" }, { k: "include_isp_hop", label: "Ping the ISP's first router", type: "bool" },
     { k: "include_watched", label: "Ping watched devices", type: "bool" },
-    { k: "speedtest_hours", label: "Speed test every (hours, 0 = only when asked)", type: "number", hint: "each test moves a few hundred MB" },
+    { k: "speedtest_hours", label: "Test from this PC every (hours, 0 = only when asked)", type: "number", hint: "each test moves a few hundred MB" },
+    { k: "router_speedtest", label: "Run speed tests on the router (uses the router's own Ookla tool; switching this on accepts Ookla's licence and privacy terms: speedtest.net/about/terms and speedtest.net/about/privacy)", type: "bool" },
+    { k: "router_speedtest_hours", label: "Test on the router every (hours, 0 = only when asked)", type: "number", hint: "at full line speed each test moves about 0.5-1 GB" },
     { k: "speedtest_seconds", label: "Seconds per direction", type: "number" },
     { k: "speedtest_server", label: "Speed test server", type: "text" },
     { k: "expected_down_mbps", label: "Your plan's download (Mbit/s, 0 = unknown)", type: "number" },
     { k: "expected_up_mbps", label: "Your plan's upload (Mbit/s, 0 = unknown)", type: "number" }] },
+  { id: "hostpc", title: "This PC as a sensor", help: "hostpc", note: "Uses this PC's Wi-Fi card to survey the air (works while it is not connected) and its network adapter to watch for broadcast floods. Read-only.", fields: [
+    { k: "enabled", label: "Use this PC as a sensor", type: "bool" }] },
   { id: "analysis", title: "Analysis thresholds", help: "set-analysis", note: "When MeshLens raises an issue. Defaults suit a typical home mesh.", fields: [
     { k: "kick_loop_count", label: "Kick loop: kicks", type: "number" }, { k: "kick_loop_minutes", label: "…within minutes", type: "number" },
     { k: "roam_storm_count", label: "Roam storm: attempts", type: "number" }, { k: "roam_storm_seconds", label: "…within seconds", type: "number" },
@@ -352,7 +401,10 @@ const SECTIONS = [
     { k: "radio_tx_fail_warn", label: "Radio Tx failures: warn at (%)", type: "number" }, { k: "radio_tx_fail_bad", label: "…high at (%)", type: "number" },
     { k: "radio_rx_err_warn", label: "Radio Rx errors: warn at (%)", type: "number" }, { k: "radio_rx_err_bad", label: "…high at (%)", type: "number" },
     { k: "radio_temp_warn", label: "Radio too hot at (°C)", type: "number" }, { k: "mass_drop_devices", label: "Mass drop: devices within a minute", type: "number" },
-    { k: "crowded_clients_24", label: "Crowded 2.4 GHz radio: devices", type: "number" }, { k: "watched_offline_hours", label: "Watched device missing after (hours)", type: "number" }] },
+    { k: "crowded_clients_24", label: "Crowded 2.4 GHz radio: devices", type: "number" },
+    { k: "flood_pps", label: "Broadcast/multicast flood at (packets/s at this PC)", type: "number" },
+    { k: "channel_busy_pct", label: "Channel busy at (% from the access point's report)", type: "number" },
+    { k: "crowded_neighbours", label: "Crowded channel: neighbouring networks", type: "number" }, { k: "watched_offline_hours", label: "Watched device missing after (hours)", type: "number" }] },
   { id: "retention", title: "Data kept", help: "set-data", note: "Older data is deleted hourly.", fields: [
     { k: "raw_days", label: "Detailed data (days)", type: "number" }, { k: "summary_days", label: "Daily summaries (days)", type: "number" }] },
   { id: "web", title: "Web interface", help: "set-web", note: "Changes take effect after MeshLens restarts (tray icon → Quit, then start it again).", fields: [
@@ -576,8 +628,12 @@ document.addEventListener("DOMContentLoaded", () => {
   $("#phone-btn").onclick = showPhone;
   $("#phone-close").onclick = () => ($("#phone-modal").hidden = true);
   $("#phone-modal").onclick = (ev) => { if (ev.target.id === "phone-modal") $("#phone-modal").hidden = true; };
-  ["#dev-search", "#dev-online", "#dev-watched"].forEach((s) => $(s).addEventListener("input", loadDevices));
-  ["#ev-kind", "#ev-hours"].forEach((s) => $(s).addEventListener("change", loadEvents));
+  ["#dev-search", "#dev-online", "#dev-watched", "#dev-unit", "#dev-band", "#dev-type", "#dev-problems"].forEach((s) => $(s).addEventListener("input", loadDevices));
+  ["#ev-kind", "#ev-hours", "#ev-unit", "#ev-band"].forEach((s) => $(s).addEventListener("change", loadEvents));
+  $("#ev-dev").addEventListener("change", loadEvents);
+  $("#ev-dev").addEventListener("search", loadEvents);
+  $("#devices-table").addEventListener("click", (ev) => { const th = ev.target.closest("th[data-sort]"); if (!th) return;
+    ev.stopPropagation(); devSort = { key: th.dataset.sort, dir: devSort.key === th.dataset.sort ? -devSort.dir : 1 }; loadDevices(); });
   ["#an-hours", "#an-sev"].forEach((s) => $(s).addEventListener("change", loadAnalysis));
   start();
   setInterval(() => { const t = document.querySelector("#tabs button.on"); if (t && !$("#tabs").hidden && $("#drawer").hidden) ({ overview: loadOverview, devices: loadDevices })[t.dataset.tab]?.(); }, 60000);

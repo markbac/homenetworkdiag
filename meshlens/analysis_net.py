@@ -111,16 +111,22 @@ def net_issues(net: dict[str, Any], devs: dict[str, dict[str, Any]], now: float)
                 ["Compare with when it is being used; see its Wi-Fi journey for kicks or roams at the same times."]))
 
     # ------------------------------------------------ speed tests and bufferbloat
-    speeds = [s for s in net.get("speeds") or [] if not s.get("error")]
+    all_speeds = [s for s in net.get("speeds") or [] if not s.get("error")]
+    router_speeds = [s for s in all_speeds if s.get("location") == "router"]
+    pc_speeds = [s for s in all_speeds if (s.get("location") or "pc") == "pc"]
+    # The line itself is best measured on the router; fall back to the PC's tests.
+    speeds = router_speeds if router_speeds and now - router_speeds[-1]["ts"] < 7 * 86400 else pc_speeds
+    graded = [s for s in all_speeds if s.get("grade")]
     if speeds:
-        last = speeds[-1]
+        last = graded[-1] if graded else speeds[-1]
         g = last.get("grade")
+        where = "on the router" if last.get("location") == "router" else "from the MeshLens PC"
         if g in ("C", "D", "F"):
             out.append(_issue(
                 "bufferbloat", "high" if g in ("D", "F") else "medium", "network", "bufferbloat",
                 f"Bufferbloat: grade {g}",
-                f"Idle latency {last['idle_ms']} ms, during download {last['down_loaded_ms']} ms, during upload "
-                f"{last['up_loaded_ms']} ms ({_hm(last['ts'])}).",
+                f"Measured {where}: idle latency {last['idle_ms']} ms, during download {last['down_loaded_ms']} ms, "
+                f"during upload {last['up_loaded_ms']} ms ({_hm(last['ts'])}).",
                 "When the line is full, the router or modem queues packets, so games and calls lag whenever someone "
                 "downloads, uploads (cloud backup, photo sync) or streams.",
                 ["Turn on the router's QoS so it keeps latency low under load: ASUS Adaptive QoS → QoS → enable, type "
@@ -142,11 +148,85 @@ def net_issues(net: dict[str, Any], devs: dict[str, dict[str, Any]], now: float)
                     "Either the line delivers less than the plan, or the MeshLens PC's own connection limits the test.",
                     ["Run a test with the MeshLens PC on a cable if it is on Wi-Fi.",
                      "If wired tests are also slow at several times of day, report it to your ISP."]))
+    if router_speeds and pc_speeds and now - pc_speeds[-1]["ts"] < 2 * 86400 and now - router_speeds[-1]["ts"] < 30 * 86400:
+        line, pc = router_speeds[-1], pc_speeds[-1]
+        if line.get("down_mbps") and pc.get("down_mbps") is not None and pc["down_mbps"] < 0.5 * line["down_mbps"]:
+            out.append(_issue(
+                "pc_path_slow", "medium", "network", "pc_path",
+                "The MeshLens PC gets much less than the internet line",
+                f"Router test: {line['down_mbps']:.0f}/{line['up_mbps'] or 0:.0f} Mbit/s; test from this PC: "
+                f"{pc['down_mbps']:.0f}/{pc['up_mbps'] or 0:.0f} Mbit/s.",
+                "The line is fine; the path between the PC and the router (its Wi-Fi, a powerline link or a slow switch "
+                "port) is the limit. Other devices on the same path are limited the same way.",
+                ["Check the PC's path on the Topology tab: a powerline link shows its speed on the map.",
+                 "A direct cable to the router (or a mesh unit with a wired backhaul) removes the bottleneck.",
+                 "Treat speed tests from this PC as a test of its path, and the router test as the line."]))
     for s in (net.get("speeds") or [])[-1:]:
         if s.get("error"):
             out.append(_issue("speedtest_failed", "low", "network", "speedtest", "The last speed test failed",
                               s["error"], "The test server could not be reached or the connection dropped mid-test.",
                               ["Run it again from the Tests tab; check the internet is up."], s["ts"], s["ts"]))
+
+    # ------------------------------------------------ the MeshLens PC as a sensor
+    acfg = net.get("analysis_cfg")
+    lan = net.get("host_lan") or []
+    if acfg and len(lan) >= 5:
+        by_ad: dict[str, list[float]] = defaultdict(list)
+        for r in lan:
+            by_ad[r["adapter"]].append((r["bcast_pps"] or 0) + (r["mcast_pps"] or 0))
+        for ad, vals in by_ad.items():
+            typical = statistics.median(vals)
+            if typical >= acfg.flood_pps:
+                worst = max(vals)
+                out.append(_issue(
+                    "lan_flood", "high" if typical >= 3 * acfg.flood_pps else "medium", "network", ad,
+                    "Lots of broadcast and multicast traffic on the network",
+                    f"The MeshLens PC ({ad}) receives about {typical:.0f} broadcast/multicast packets a second "
+                    f"(peak {worst:.0f}). A quiet home network is usually under 30.",
+                    "Every device has to receive and look at broadcast and multicast packets, and on Wi-Fi they go out at the "
+                    "slowest rate, using airtime for everyone. A single misbehaving device (a network scanner, a camera, a "
+                    "looping cable) can cause this, or IGMP snooping being off.",
+                    ["Unplug or power off suspect devices one at a time and watch the graph (Graphs → Broadcast and "
+                     "multicast); network scanners such as Fing/Domotz boxes are common culprits.",
+                     "Turn on IGMP snooping (LAN → IPTV) if casting and IPTV still work afterwards.",
+                     "Check for a network loop: two cables between the same switches, or powerline adapters bridged twice."]))
+    air = net.get("air") or []
+    if acfg and air:
+        latest_ts = max(r["ts"] for r in air)
+        util: dict[tuple, list[int]] = defaultdict(list)
+        for r in air:
+            if r.get("own_unit") and r.get("util_pct") is not None:
+                util[(r["own_unit"], r["band"], r["channel"])].append(r["util_pct"])
+        unit_names = net.get("unit_names") or {}
+        for (unit, band, ch), vals in util.items():
+            typical = statistics.median(vals)
+            if typical >= acfg.channel_busy_pct and len(vals) >= 2:
+                out.append(_issue(
+                    "channel_busy", "high" if typical >= 75 else "medium", "unit", unit,
+                    f"{unit_names.get(unit, unit)} {band} GHz channel {ch} is {typical:.0f}% busy",
+                    f"The access point itself reports its channel busy {typical:.0f}% of the time (peak {max(vals)}%), "
+                    "measured by the MeshLens PC's air survey.",
+                    "The air is shared by every device and every nearby network on the channel. Above about 50% devices "
+                    "wait to transmit, which shows as lag and slow speeds; slow or distant devices use the most airtime.",
+                    (["Move devices that can use 5 GHz off 2.4 GHz; 2.4 GHz should carry only the things that need it.",
+                      "Use 20 MHz width on 2.4 GHz and the least-used of channels 1, 6 and 11.",
+                      "Smart-home devices on a separate IoT network don't reduce airtime on their own; fewer chatty "
+                      "devices does."] if band == "2.4" else
+                     ["Try another channel (the air survey shows which ones neighbours use).",
+                      "Check which devices are connected at low rates (Analysis → device health): they use the most airtime."])))
+        latest = [r for r in air if r["ts"] == latest_ts]
+        neigh: dict[tuple, list[str]] = defaultdict(list)
+        own_ch = {(r["band"], r["channel"]) for r in latest if r.get("own_unit")}
+        for r in latest:
+            if not r.get("own_unit") and (r.get("signal_pct") or 0) >= 40 and (r["band"], r["channel"]) in own_ch:
+                neigh[(r["band"], r["channel"])].append(r.get("ssid") or r["bssid"])
+        for (band, ch), names in neigh.items():
+            if len(names) >= acfg.crowded_neighbours:
+                out.append(_issue(
+                    "crowded_channel", "low", "network", f"{band}-{ch}", f"{len(names)} neighbouring networks on your {band} GHz channel {ch}",
+                    "Heard strongly by the MeshLens PC: " + ", ".join(sorted(set(names))[:8]) + ".",
+                    "Networks on the same channel take turns with yours.",
+                    ["Pick a channel with fewer strong neighbours (Router → This PC lists them)."]))
 
     # ------------------------------------------------ open ports
     risky: dict[str, list[dict[str, Any]]] = defaultdict(list)
