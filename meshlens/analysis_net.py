@@ -392,6 +392,51 @@ def net_issues(net: dict[str, Any], devs: dict[str, dict[str, Any]], now: float)
                 "electrical interference; on the WAN port it can be the modem.",
                 ["Swap the cable for a known-good one (Cat 5e or better) and check both connectors."]))
 
+    # ------------------------------------------------ address pool, connections per device, router warnings
+    router_u = next((u for u in net.get("units") or [] if u.get("role") == "router"), None)
+    rinfo = (router_u or {}).get("info") or {}
+    dhcp = rinfo.get("dhcp")
+    if dhcp and dhcp.get("pct", 0) >= 85:
+        out.append(_issue(
+            "dhcp_pool_full", "high" if dhcp["pct"] >= 95 else "medium", "network", "dhcp",
+            "The router is running out of addresses to hand out",
+            f"{dhcp['leases']} of {dhcp['size']} addresses in use ({dhcp['pct']}%), pool {dhcp['start']}-{dhcp['end']}.",
+            "When the pool is full, new devices (or devices that reconnect with a new private address) can't join the network.",
+            ["Make the DHCP pool bigger (LAN → DHCP Server), or shorten the lease time so old addresses are freed sooner."]))
+    devs_by_mac = {d["mac"]: d for d in net.get("devices") or []}
+    top = rinfo.get("conn_top") or []
+    total = rinfo.get("conn_total") or 0
+    if top:
+        t = top[0]
+        if t["count"] >= 1000 or (total >= 2000 and t["count"] >= 0.4 * total):
+            name = display_name(devs_by_mac.get(t.get("mac")), t.get("mac") or t["ip"]) if t.get("mac") else t["ip"]
+            out.append(_issue(
+                "conn_heavy", "medium" if t["count"] >= 3000 else "low", "device", t.get("mac") or t["ip"],
+                f"{name} has {t['count']} connections open",
+                f"{t['count']} of the router's {total} tracked connections come from {name} ({t['ip']}).",
+                "Huge numbers of connections usually mean file sharing, a backup or sync tool, or a device that is "
+                "misbehaving or infected. They fill the router's connection table and use its processor.",
+                ["Check what that device is doing; pause file sharing or sync and see if the count drops."]))
+    warn = by_kind.get("router_warning", [])
+    if warn:
+        groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for e in warn:
+            groups[e["detail"].get("what", "?")].append(e)
+        serious = ("Out of memory", "oom-killer", "segfault", "Kernel panic", "Unable to handle kernel", "BUG: ",
+                   "nf_conntrack: table full", "no address range available")
+        for what, es in groups.items():
+            out.append(_issue(
+                "router_warning", "medium" if what in serious else "low", "unit", f"{es[-1]['unit']}-{what}",
+                f"{names.get(es[-1]['unit'], es[-1]['unit'])} logged '{what.strip()}'" + (f" {len(es)} times" if len(es) > 1 else ""),
+                f"Last at {_hm(es[-1]['ts'])}.",
+                {"no address range available": "The DHCP pool is exhausted: new devices can't get an address.",
+                 "DHCPNAK": "The router refused a device's address request (often a device asking for an old address).",
+                 "nf_conntrack: table full": "The connection table filled up and new connections were dropped.",
+                 "possible SYN flooding": "Something sent a burst of connection attempts to the router (scan or misbehaving device).",
+                 }.get(what, "The router's software reported a serious problem (memory, a crash or a hung task)."),
+                ["If it repeats, restart the unit and update the firmware; look at the matching time in Wi-Fi events and Graphs."],
+                es[0]["ts"], es[-1]["ts"], count=len(es)))
+
     # ------------------------------------------------ settings that matter for speed (main router)
     main = next((u for u, n in names.items() if n == "Main router"), None)
     s = (net.get("settings") or {}).get(main or "", {})

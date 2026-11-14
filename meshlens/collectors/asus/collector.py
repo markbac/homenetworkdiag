@@ -228,6 +228,40 @@ class AsusCollector:
                 self._enrich(fields, mac, nmp, leases, table)
                 db.upsert_device(mac, d.get("conn_ts") or now, **fields)
 
+        # Wi-Fi standard / streams / width seen on each device's link (kept on the device record).
+        for r in results:
+            for st in r.stations if r.ok else []:
+                fields = {k: st.get(src) for k, src in (("wifi_gen", "wifi_gen"), ("wifi_nss", "nss"), ("wifi_width", "width"))
+                          if st.get(src) is not None}
+                dev = db.device(st["mac"]) if fields else None
+                if not dev:
+                    continue
+                # The link's current mode drops when a device idles or is far away: keep the best it has shown.
+                rank = {"legacy": 0, "Wi-Fi 4": 4, "Wi-Fi 5": 5, "Wi-Fi 6": 6, "Wi-Fi 7": 7}
+                if dev.get("wifi_gen") and rank.get(fields.get("wifi_gen"), -1) < rank.get(dev["wifi_gen"], -1):
+                    fields.pop("wifi_gen", None)
+                for k in ("wifi_nss", "wifi_width"):
+                    if k in fields and dev.get(k) and fields[k] < dev[k]:
+                        fields.pop(k)
+                if fields:
+                    db.set_device_fields(st["mac"], **fields)
+
+        # Address pool and connections per device (main router, full polls).
+        if full and "conn_counts" in s:
+            counts = P.parse_conn_counts(s["conn_counts"])
+            by_ip = {d["ip"]: d["mac"] for d in db.devices() if d.get("ip")}
+            db.insert_many("conn_samples", [{"ts": now, "ip": c["ip"], "mac": by_ip.get(c["ip"]), "count": c["count"]}
+                                            for c in counts[:40]])
+            main.info["conn_top"] = [{**c, "mac": by_ip.get(c["ip"])} for c in counts[:15]]
+            main.info["conn_total"] = sum(c["count"] for c in counts)
+        if full and main.settings and "leases" in s:
+            pool = P.dhcp_pool(main.settings, len(P.parse_leases(s["leases"])))
+            if pool:
+                main.info["dhcp"] = pool
+        if full and (main.info.get("conn_top") is not None or main.info.get("dhcp")):
+            db.upsert_unit(main.mac, info=json.dumps({**main.info, "ts": now, "system": (db.units() and next(
+                (u.get("info") or {}).get("system") for u in db.units() if u["mac"] == main.mac)) or {}}, default=str))
+
     def _derived_events(self, r: UnitResult, links: dict[str, dict[str, Any]], now: float) -> list[dict[str, Any]]:
         """Events MeshLens works out by comparing polls: wired link up/down, channel changes, new internet address."""
         import hashlib

@@ -36,7 +36,8 @@ CREATE TABLE IF NOT EXISTS devices (
   model TEXT, dtype TEXT,         -- detected model, classified type
   os_hint TEXT,                   -- DHCP vendor class, e.g. MSFT 5.0 (Windows), android-dhcp-17
   last_alive REAL,                -- last answered a ping / ARP
-  ports_scanned REAL
+  ports_scanned REAL,
+  wifi_gen TEXT, wifi_nss INTEGER, wifi_width INTEGER  -- standard and streams seen on its Wi-Fi link
 );
 
 CREATE TABLE IF NOT EXISTS units (
@@ -136,6 +137,11 @@ CREATE TABLE IF NOT EXISTS unit_samples (
   conntrack INTEGER, conntrack_max INTEGER, jffs_pct INTEGER, tmp_pct INTEGER, uptime_s INTEGER
 );
 CREATE INDEX IF NOT EXISTS unit_samples_ts ON unit_samples(ts);
+
+CREATE TABLE IF NOT EXISTS conn_samples (
+  ts REAL, ip TEXT, mac TEXT, count INTEGER
+);
+CREATE INDEX IF NOT EXISTS conn_samples_ts ON conn_samples(ts);
 
 CREATE TABLE IF NOT EXISTS daily_device_summary (
   day TEXT, mac TEXT, kicks INTEGER, roams INTEGER, connects INTEGER, disconnects INTEGER,
@@ -283,7 +289,7 @@ def prune(raw_days: int, summary_days: int, now: float | None = None) -> None:
     with _write_lock:
         c = conn()
         for t in ("station_samples", "radio_samples", "iface_counters", "events", "unit_settings", "inventory_events",
-                  "plc_rates", "ping_minutes", "host_lan", "air_scan", "unit_samples"):
+                  "plc_rates", "ping_minutes", "host_lan", "air_scan", "unit_samples", "conn_samples"):
             c.execute(f"DELETE FROM {t} WHERE ts < ?", (cut,))
         day_cut = time.strftime("%Y-%m-%d", time.localtime(now - summary_days * 86400))
         c.execute("DELETE FROM daily_device_summary WHERE day < ?", (day_cut,))
@@ -593,3 +599,7 @@ def unit_samples_since(since: float, unit: str | None = None) -> list[dict[str, 
         q += " AND unit = ?"
         args.append(unit)
     return _rows(conn().execute(q + " ORDER BY ts", args))
+
+
+def conn_samples_since(since: float) -> list[dict[str, Any]]:
+    return _rows(conn().execute("SELECT * FROM conn_samples WHERE ts >= ? ORDER BY ts", (since,)))

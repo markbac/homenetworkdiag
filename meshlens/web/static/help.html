@@ -212,6 +212,16 @@
   came back. Occasional reconnects are normal (some ISPs do it nightly); frequent ones are worth reporting with the times.</p>
 <h3 id="issue-unit_restarted_log">Unit was restarted</h3><p>The unit's log shows a deliberate restart (the firmware's housekeeping, the ASUS
   app, or a schedule) rather than a crash.</p>
+<h3 id="issue-dhcp_pool_full">Running out of addresses</h3><p>The router hands out addresses from a pool (LAN → DHCP Server).
+  When it is nearly full new devices can't join; phones with private addresses can use more than one over time. Enlarge the pool or
+  shorten the lease time.</p>
+<h3 id="issue-conn_heavy">A device has a huge number of connections</h3><p>MeshLens counts, on the router, how many connections each
+  device has open (only the counts leave the router). Thousands usually mean file sharing, a sync/backup tool or a misbehaving device.</p>
+<h3 id="issue-router_warning">Router warning</h3><p>A serious message in the router's own log: address pool exhausted, connection
+  table full, out of memory, a crash or a hung task. MeshLens watches for a short list of these rather than every log line.</p>
+<h3 id="wifi-standard">Wi-Fi standard and streams</h3><p>Each device's Wi-Fi standard (Wi-Fi 4/5/6/7) and number of antenna streams
+  as seen on its link to the mesh. Older standards and single-stream devices need more airtime for the same data, which slows everyone
+  on that radio; on the busy 2.4 GHz band especially.</p>
 <h3 id="issue-firmware_update">Firmware update available</h3><p>The router itself reports a newer firmware. Update from the ASUS app or web UI.</p>
 <h3 id="issue-qos_off">QoS off while bufferbloat is high</h3><p>Turn on Adaptive QoS with the bandwidth set to about 90% of the router speed
   test's results; that keeps games and calls responsive while someone uploads or downloads.</p>
