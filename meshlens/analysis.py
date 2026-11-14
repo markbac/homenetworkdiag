@@ -255,15 +255,20 @@ def analyse(events: Iterable[dict[str, Any]], samples: Iterable[dict[str, Any]],
             continue
         err = u.get("last_error") or "no answer"
         unmanaged = "cfg_device_list" in err
+        via = next((x.get("alias") or x["mac"] for x in units if x["mac"] == u.get("via_unit")), None)
         name = u.get("alias") or u.get("model") or u["mac"]
         issues.append(_issue(
-            "unit_unreachable", "info" if unmanaged else "medium", "unit", u["mac"],
-            f"MeshLens cannot read {name}" if not unmanaged else f"{name} is not in the router's mesh list",
-            err,
-            ("The router reports clients on this unit but does not list it as a managed AiMesh node, so MeshLens "
-             "has no address to read it at. Its clients still show up via the router." if unmanaged else
+            "unit_unreachable", "medium" if unmanaged else "medium", "unit", u["mac"],
+            f"MeshLens cannot read {name}" if not unmanaged else f"{name} isn't fully synced with the mesh",
+            err + (f"; it connects through {via}" if via else ""),
+            ("The unit is part of the mesh (it serves devices and the router keeps its settings file), but the router "
+             "doesn't list it as a synced node. Settings pushed from the router, including SSH, then don't reach it, "
+             "which is why MeshLens can't read it. Common causes: a firmware version different from the other units, "
+             "or a settings sync that got stuck." if unmanaged else
              "The unit did not answer over SSH: it may be off, its backhaul down, or SSH not enabled on it."),
-            (["In the ASUS app check the unit is a mesh node (not a separate router or repeater)."] if unmanaged else
+            (["In the ASUS app, open the unit and check its firmware matches the others; update it if not.",
+              "Restart the unit (power off and on); it re-syncs with the router when it rejoins.",
+              "If it still isn't listed, remove it from the mesh in the ASUS app and add it again."] if unmanaged else
              ["Check the unit is powered and shows as connected in the ASUS app.",
               "SSH is set on the main router and applies to nodes after they sync; reboot the node if needed."])))
 

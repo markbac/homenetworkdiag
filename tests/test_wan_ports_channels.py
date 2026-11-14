@@ -72,3 +72,17 @@ def test_new_rules():
     units = [{"mac": u, "info": {"ifaces": [{"iface": "ath1", "band": "5", "channel": 100}]}}]
     res = analyse([], [], [], [], [], {}, now=now, net={"analysis_cfg": config.AnalysisConfig(), "units": units, "unit_names": {}})
     assert any(i["rule"] == "dfs_channel" for i in res["issues"])
+
+
+def test_arp_and_relayed_unit_parent():
+    arp = P.parse_proc_arp("IP address HW type Flags HW address Mask Device\n"
+                           "10.0.11.133 0x1 0x2 46:00:00:00:02:49 * br0\n10.0.11.99 0x1 0x0 00:00:00:00:00:00 * br0\n")
+    assert arp == {"10.0.11.133": "46:00:00:00:02:49"}
+    from meshlens import topology
+    units = [{"mac": "02:00:00:00:01:64", "role": "router", "alias": "Main", "reachable": 1, "macs": []},
+             {"mac": "02:00:00:00:02:48", "role": "node", "alias": "Office", "reachable": 1, "macs": ["46:00:00:00:02:49"]},
+             {"mac": "02:00:00:00:03:e8", "role": "node", "alias": "Garden", "reachable": 0, "macs": [],
+              "via_unit": "02:00:00:00:02:48"}]
+    n = {x["id"]: x for x in topology.build(units, [], [], [], [], now=1.0)["nodes"]}
+    assert n["02:00:00:00:03:e8"]["parent"] == "02:00:00:00:02:48"
+    assert n["02:00:00:00:03:e8"]["link"]["type"] == "wireless (through this unit)"

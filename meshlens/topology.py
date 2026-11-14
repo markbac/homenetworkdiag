@@ -113,6 +113,8 @@ def build(units: list[dict[str, Any]], devices: list[dict[str, Any]], stations: 
                     "rx_rate": s.get("rx_rate")}
         elif adapter_behind(u["mac"]) and adapter_behind(u["mac"]) in nodes:
             parent, link = adapter_behind(u["mac"]), {"type": "ethernet", "via": "powerline"}
+        elif u.get("via_unit") and unit_of(u["via_unit"]) and unit_of(u["via_unit"]) != u["mac"]:
+            parent, link = unit_of(u["via_unit"]), {"type": "wireless (through this unit)"}
         elif u.get("parent_hint") and unit_of(u["parent_hint"]):
             parent, link = unit_of(u["parent_hint"]), {"type": "wireless (preferred parent)"}
         elif u.get("reachable"):

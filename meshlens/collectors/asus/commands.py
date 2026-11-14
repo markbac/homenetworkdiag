@@ -75,6 +75,8 @@ def unit_script(main: bool, first_poll: bool, full: bool) -> str:
             'echo "@@@ allwclientlist"; cat /tmp/allwclientlist.json 2>/dev/null; echo',
             'echo "@@@ wiredclientlist"; cat /tmp/wiredclientlist.json 2>/dev/null; echo',
             'echo "@@@ relist"; cat /tmp/relist.json 2>/dev/null; echo',
+            # Which hardware address answers for each IP: a unit behind another unit's backhaul radio shows that radio.
+            'echo "@@@ arp"; cat /proc/net/arp 2>/dev/null',
         ]
         if full:
             lines += [

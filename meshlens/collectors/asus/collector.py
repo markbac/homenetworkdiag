@@ -179,13 +179,22 @@ class AsusCollector:
         for unit_mac, a in aliases.items():
             if unit_mac not in models:
                 db.upsert_unit(unit_mac, role="node", alias=a.get("alias"), reachable=0, parent_hint=a.get("prefer_parent"),
-                               last_error="not in the router's managed node list (cfg_device_list)",
+                               last_error="serves devices, but the router doesn't list it as a synced mesh node (cfg_device_list)",
                                macs=json.dumps(sorted({unit_mac, *backhaul.get(unit_mac, {}).values()})))
 
         if "ookla_history" in s:
             from .speedtest import parse_history
             db.add_speed_tests([{**r, "trigger": "router (ASUS app)", "location": "router"}
                                 for r in parse_history(s["ookla_history"])])
+
+        # Units whose address is answered by another unit's backhaul radio are connected through that unit.
+        if "arp" in s:
+            arp = P.parse_proc_arp(s["arp"])
+            sta_to_node = {sta: node for node, stas in backhaul.items() for sta in stas.values() if sta}
+            for u in db.units():
+                via = sta_to_node.get(arp.get(u.get("ip") or ""))
+                if via and via != u["mac"]:
+                    db.upsert_unit(u["mac"], via_unit=via)
 
         # Mesh-wide client view from the router.
         table = oui.load(download=False) if full else None

@@ -189,6 +189,16 @@ def parse_df(text: str) -> dict[str, Any]:
     return {k: v for k, v in out.items() if k in ("jffs_pct", "tmp_pct")}
 
 
+def parse_proc_arp(text: str) -> dict[str, str]:
+    """``/proc/net/arp`` -> {ip: mac} (complete entries only)."""
+    out = {}
+    for line in text.splitlines()[1:]:
+        p = line.split()
+        if len(p) >= 4 and re.fullmatch(MAC_RE, p[3]) and p[3] != "00:00:00:00:00:00" and p[2] != "0x0":
+            out[p[0]] = norm_mac(p[3])
+    return out
+
+
 def parse_conn_counts(text: str) -> list[dict[str, Any]]:
     """``<count> <ip>`` lines (connections per local address, counted on the router) -> busiest first."""
     out = []
