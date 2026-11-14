@@ -78,7 +78,7 @@ def parse_networks(text: str) -> list[dict[str, Any]]:
 
 def own_unit(bssid: str, units: list[dict[str, Any]]) -> str | None:
     """ASUS BSSIDs share bytes 1, 2 and 4 with the unit's MAC; byte 0, byte 3 and the last byte vary per
-    radio/SSID (e.g. unit cc:28:aa:6c:2e:64 broadcasts ce:28:aa:1c:2e:64). The closest last byte wins."""
+    radio/SSID (e.g. unit 02:28:aa:6c:2e:64 broadcasts 06:28:aa:1c:2e:64). The closest last byte wins."""
     key = (bssid[3:8], bssid[12:14])
     best, dist = None, 99
     for u in units:
