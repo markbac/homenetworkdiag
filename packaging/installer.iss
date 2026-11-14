@@ -70,7 +70,7 @@ function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   ResultCode: Integer;
 begin
-  Exec(ExpandConstant('{sys}\taskkill.exe'), '/IM MeshLens.exe /F /T', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/IM MeshLens.exe /F', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Sleep(1500);
   Result := '';
 end;

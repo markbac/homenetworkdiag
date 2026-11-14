@@ -114,9 +114,49 @@ def can_self_update() -> bool:
     return sys.platform == "win32" and bool(getattr(sys, "frozen", False))
 
 
+def _shell_execute(path: Path, args: str) -> int:
+    """ShellExecuteEx with "open": Windows shows the UAC prompt for the installer itself, and Setup keeps the
+    signed-in user as its "original user", so it can start MeshLens again as that user afterwards.
+    Returns the installer's process id."""
+    from ctypes import wintypes
+
+    class SHELLEXECUTEINFOW(ctypes.Structure):
+        _fields_ = [("cbSize", wintypes.DWORD), ("fMask", ctypes.c_ulong), ("hwnd", wintypes.HWND),
+                    ("lpVerb", wintypes.LPCWSTR), ("lpFile", wintypes.LPCWSTR), ("lpParameters", wintypes.LPCWSTR),
+                    ("lpDirectory", wintypes.LPCWSTR), ("nShow", ctypes.c_int), ("hInstApp", wintypes.HINSTANCE),
+                    ("lpIDList", ctypes.c_void_p), ("lpClass", wintypes.LPCWSTR), ("hkeyClass", wintypes.HKEY),
+                    ("dwHotKey", wintypes.DWORD), ("hIconOrMonitor", wintypes.HANDLE), ("hProcess", wintypes.HANDLE)]
+
+    SEE_MASK_NOCLOSEPROCESS = 0x40
+    info = SHELLEXECUTEINFOW(cbSize=ctypes.sizeof(SHELLEXECUTEINFOW), fMask=SEE_MASK_NOCLOSEPROCESS, lpVerb="open",
+                             lpFile=str(path), lpParameters=args, nShow=1)
+    shell32 = ctypes.WinDLL("shell32", use_last_error=True)
+    if not shell32.ShellExecuteExW(ctypes.byref(info)):
+        err = ctypes.get_last_error()
+        raise RuntimeError("the update was cancelled at the Windows permission prompt" if err == 1223 else
+                           f"could not start the installer (error {err})")
+    pid = ctypes.windll.kernel32.GetProcessId(info.hProcess)
+    ctypes.windll.kernel32.CloseHandle(info.hProcess)
+    return pid
+
+
+def relaunch_watcher(installer_pid: int, exe: str) -> None:
+    """Backstop: a hidden helper waits for Setup to finish, then starts MeshLens unless it is already running.
+    Started detached so it survives MeshLens being closed by the installer."""
+    import subprocess
+    exe_ps = exe.replace("'", "''")
+    script = (f"Wait-Process -Id {int(installer_pid)} -ErrorAction SilentlyContinue; Start-Sleep -Seconds 4; "
+              f"if (-not (Get-Process -Name MeshLens -ErrorAction SilentlyContinue)) "
+              f"{{ Start-Process -FilePath '{exe_ps}' -ArgumentList '--tray' }}")
+    flags = 0x00000008 | 0x00000200 | 0x08000000   # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW
+    subprocess.Popen(["powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", script],
+                     creationflags=flags, close_fds=True)
+
+
 def launch_installer(path: Path) -> None:
-    """Start the installer elevated (UAC prompt). Raises if the user declines or it can't start."""
-    rc = ctypes.windll.shell32.ShellExecuteW(None, "runas", str(path), INSTALLER_ARGS, None, 1)
-    if rc <= 32:
-        raise RuntimeError("the update was cancelled at the Windows permission prompt" if rc == 5 else
-                           f"could not start the installer (code {rc})")
+    """Start the installer (Windows asks for permission) and make sure MeshLens comes back afterwards."""
+    pid = _shell_execute(path, INSTALLER_ARGS)
+    try:
+        relaunch_watcher(pid, sys.executable)
+    except OSError as e:
+        log.warning("could not start the restart helper: %s", e)

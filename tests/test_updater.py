@@ -68,3 +68,14 @@ def test_logins_survive_restart_and_tokens_are_not_stored(tmp_path):
     assert b.valid(token)
     b.end_all()
     assert not Auth(tmp_path / "web_auth.json").valid(token)
+
+
+def test_relaunch_watcher_script(monkeypatch):
+    calls = []
+    monkeypatch.setattr("subprocess.Popen", lambda args, **kw: calls.append((args, kw)))
+    updater.relaunch_watcher(1234, r"C:\Program Files\MeshLens\MeshLens.exe")
+    args, kw = calls[0]
+    script = args[-1]
+    assert "Wait-Process -Id 1234" in script and "Get-Process -Name MeshLens" in script
+    assert r"'C:\Program Files\MeshLens\MeshLens.exe'" in script and "--tray" in script
+    assert kw["creationflags"] & 0x8                     # detached: survives MeshLens being closed by setup

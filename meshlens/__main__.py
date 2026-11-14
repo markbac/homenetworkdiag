@@ -16,6 +16,21 @@ from .web.auth import Auth
 from .web.server import run_in_thread
 
 
+_MUTEX = None
+
+
+def already_running() -> bool:
+    """True if another MeshLens tray app is running for this Windows user (named mutex)."""
+    import sys
+    global _MUTEX
+    if sys.platform != "win32":
+        return False
+    import ctypes
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    _MUTEX = k32.CreateMutexW(None, False, "Local\\MeshLensTray")
+    return ctypes.get_last_error() == 183      # ERROR_ALREADY_EXISTS
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(prog="meshlens", description="MeshLens home network diagnostics")
     ap.add_argument("--tray", action="store_true", help="run with a system tray icon")
@@ -26,6 +41,10 @@ def main() -> None:
 
     logging_setup.setup(logging.DEBUG if args.debug else logging.INFO, console=not args.tray)
     cfg = config.load()
+    if args.tray and already_running():
+        import webbrowser
+        webbrowser.open(f"http://localhost:{cfg.web.port}/")
+        return
     engine = Engine(cfg)
 
     if args.once:
