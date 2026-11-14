@@ -255,15 +255,33 @@ def analyse(events: Iterable[dict[str, Any]], samples: Iterable[dict[str, Any]],
             continue
         err = u.get("last_error") or "no answer"
         unmanaged = "cfg_device_list" in err
+        ssh_closed = "SSH isn't open" in err
+        via = next((x.get("alias") or x["mac"] for x in units if x["mac"] == u.get("via_unit")), None)
         name = u.get("alias") or u.get("model") or u["mac"]
+        if ssh_closed:
+            issues.append(_issue(
+                "unit_ssh_closed", "medium", "unit", u["mac"], f"MeshLens can't read {name} directly",
+                f"{name} is online in the mesh but SSH is closed on it" + (f"; it connects through {via}" if via else "") + ".",
+                "SSH is a setting the main router sends to every node. This node never applied it (the router's own record "
+                "also leaves it out of the list of synced nodes), so MeshLens can only see it through the router: its "
+                "devices and its link, but not its radios, logs, CPU or memory.",
+                ["Re-send the setting: on the main router's web UI, Administration → System → Enable SSH, click Apply "
+                 "(keep LAN only and the same port).",
+                 "Then restart the node so it re-syncs; MeshLens tries it on every poll and starts reading it by itself.",
+                 "If it still won't sync, check its firmware in the ASUS app, or remove and re-add it."]))
+            continue
         issues.append(_issue(
-            "unit_unreachable", "info" if unmanaged else "medium", "unit", u["mac"],
-            f"MeshLens cannot read {name}" if not unmanaged else f"{name} is not in the router's mesh list",
-            err,
-            ("The router reports clients on this unit but does not list it as a managed AiMesh node, so MeshLens "
-             "has no address to read it at. Its clients still show up via the router." if unmanaged else
+            "unit_unreachable", "medium" if unmanaged else "medium", "unit", u["mac"],
+            f"MeshLens cannot read {name}" if not unmanaged else f"{name} isn't fully synced with the mesh",
+            err + (f"; it connects through {via}" if via else ""),
+            ("The unit is part of the mesh (it serves devices and the router keeps its settings file), but the router "
+             "doesn't list it as a synced node. Settings pushed from the router, including SSH, then don't reach it, "
+             "which is why MeshLens can't read it. Common causes: a firmware version different from the other units, "
+             "or a settings sync that got stuck." if unmanaged else
              "The unit did not answer over SSH: it may be off, its backhaul down, or SSH not enabled on it."),
-            (["In the ASUS app check the unit is a mesh node (not a separate router or repeater)."] if unmanaged else
+            (["In the ASUS app, open the unit and check its firmware matches the others; update it if not.",
+              "Restart the unit (power off and on); it re-syncs with the router when it rejoins.",
+              "If it still isn't listed, remove it from the mesh in the ASUS app and add it again."] if unmanaged else
              ["Check the unit is powered and shows as connected in the ASUS app.",
               "SSH is set on the main router and applies to nodes after they sync; reboot the node if needed."])))
 
@@ -381,7 +399,7 @@ def analyse(events: Iterable[dict[str, Any]], samples: Iterable[dict[str, Any]],
     dev_health = {mac: {"score": scores[mac], "label": _label(scores[mac]), **facts[mac]} for mac in facts}
     unit_health: dict[str, dict[str, Any]] = {}
     for u in units:
-        managed = "cfg_device_list" not in (u.get("last_error") or "")
+        managed = not any(x in (u.get("last_error") or "") for x in ("cfg_device_list", "SSH isn't open"))
         if not managed:
             unit_health[u["mac"]] = {"score": None, "label": None, "note": "not a managed node"}
             continue

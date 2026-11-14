@@ -67,12 +67,12 @@ def test_radio_errors_unit_health_and_mass_drop():
     assert res["units"][ROUTER]["score"] < res["units"][NODE]["score"] == 100
 
 
-def test_unmanaged_unit_is_info_and_unscored():
+def test_unsynced_unit_is_reported_and_unscored():
     units = UNITS + [{"mac": "02:00:00:00:03:e8", "alias": "Garden", "reachable": 0,
                       "last_error": "not in the router's cfg_device_list (not a managed node)"}]
     res = analyse([], [], [], units, [], {}, now=NOW)
     g = next(i for i in res["issues"] if i["subject"] == "02:00:00:00:03:e8")
-    assert g["severity"] == "info" and res["units"]["02:00:00:00:03:e8"]["score"] is None
+    assert g["severity"] == "medium" and "synced" in g["title"] and res["units"]["02:00:00:00:03:e8"]["score"] is None
 
 
 def test_vendor_pattern_and_settings_review():

@@ -2,7 +2,7 @@
 // Topology, Tests (monitors, speed tests) and discovery views. Uses helpers from app.js.
 
 const LINK_TYPE = { wan: "Internet line", ethernet: "Ethernet", powerline: "Powerline", wireless: "Wi-Fi backhaul",
-  "wireless (preferred parent)": "Wi-Fi backhaul (from its settings)", "ethernet or unknown": "Ethernet or unknown", unknown: "unknown", wifi: "Wi-Fi" };
+  "wireless (preferred parent)": "Wi-Fi backhaul (from its settings)", "wireless (through this unit)": "Wi-Fi, through this unit", "ethernet or unknown": "Ethernet or unknown", unknown: "unknown", wifi: "Wi-Fi" };
 const KIND_ICON = { internet: "🌐", router: "◎", node: "◉", powerline: "⚡", device: "•" };
 
 function linkText(l) {

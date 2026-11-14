@@ -189,6 +189,16 @@ def parse_df(text: str) -> dict[str, Any]:
     return {k: v for k, v in out.items() if k in ("jffs_pct", "tmp_pct")}
 
 
+def parse_proc_arp(text: str) -> dict[str, str]:
+    """``/proc/net/arp`` -> {ip: mac} (complete entries only)."""
+    out = {}
+    for line in text.splitlines()[1:]:
+        p = line.split()
+        if len(p) >= 4 and re.fullmatch(MAC_RE, p[3]) and p[3] != "00:00:00:00:00:00" and p[2] != "0x0":
+            out[p[0]] = norm_mac(p[3])
+    return out
+
+
 def parse_conn_counts(text: str) -> list[dict[str, Any]]:
     """``<count> <ip>`` lines (connections per local address, counted on the router) -> busiest first."""
     out = []
@@ -243,6 +253,30 @@ def parse_uptime(text: str) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------- mesh and clients (router state files)
+
+def parse_cfgmnt(text: str) -> dict[str, dict[str, Any]]:
+    """``/tmp/cfgmnt_log.txt`` (the mesh controller's node record) -> {node_mac: details}."""
+    t = text.strip()
+    if "{" not in t:
+        return {}
+    try:
+        d = json.loads(t[t.index("{"):])
+    except ValueError:
+        return {}
+    out = {}
+    for c in d.get("client_list") or []:
+        if not isinstance(c, dict) or not c.get("mac"):
+            continue
+        out[norm_mac(c["mac"])] = {
+            "alias": c.get("alias") or None, "model": c.get("model_name") or None, "productid": c.get("product_id") or None,
+            "firmware": c.get("fwver") or None, "ip": c.get("ip") or None, "online": str(c.get("online")) == "1",
+            "level": int(c["level"]) if str(c.get("level", "")).lstrip("-").isdigit() else None,
+            "rssi2g": int(c["rssi2g"]) if str(c.get("rssi2g", "")).lstrip("-").isdigit() else None,
+            "rssi5g": int(c["rssi5g"]) if str(c.get("rssi5g", "")).lstrip("-").isdigit() else None,
+            "rssi6g": int(c["rssi6g"]) if str(c.get("rssi6g", "")).lstrip("-").isdigit() else None,
+        }
+    return out
+
 
 def parse_cfg_device_list(text: str) -> list[dict[str, Any]]:
     """``nvram get cfg_device_list``: ``<Model>IP>MAC>is_main<Model>...``."""

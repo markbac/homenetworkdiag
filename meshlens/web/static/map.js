@@ -17,6 +17,7 @@ const MapView = (() => {
     if (l.type === "wireless") { const r = l.bands && l.bands.length ? l.bands[0].rssi : l.rssi; return { color: sigColor(r), width: 4, dash: "2 6", cap: "round" }; }
     if (l.type === "powerline") { const s = l.slowest; return { color: s == null ? css("--muted") : s < 20 ? css("--bad") : s < 50 ? css("--warn") : css("--good"), width: 4, dash: "10 6" }; }
     if (l.type === "wan") return { color: css("--accent"), width: 4, dash: "" };
+    if (l.type === "wireless (through this unit)") return { color: css("--muted"), width: 3, dash: "2 6", cap: "round" };
     return { color: css("--muted"), width: 3, dash: "" };
   }
 
@@ -26,6 +27,7 @@ const MapView = (() => {
     if (l.type === "wireless") return `${l.band || "?"} GHz ${l.rssi ?? ""} dBm`;
     if (l.type === "powerline") return `powerline ↓${l.down_mbps ?? "?"} ↑${l.up_mbps ?? "?"} Mbit/s`;
     if (l.type === "wan") return "internet line";
+    if (l.type === "wireless (through this unit)") return "Wi-Fi, through this unit";
     return l.type === "ethernet" ? "Ethernet" + (l.via ? ` via ${l.via}` : "") : l.type;
   }
 

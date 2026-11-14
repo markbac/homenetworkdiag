@@ -48,7 +48,8 @@ CREATE TABLE IF NOT EXISTS units (
   reachable INTEGER, last_seen REAL, last_error TEXT,
   parent_hint TEXT,               -- preferred parent BSSID from the node's own settings
   backhaul TEXT,                  -- JSON [{parent, band, rssi, ts}]: this node's backhaul radios seen as clients
-  info TEXT                       -- JSON snapshot: identity, uptime, load, interfaces, ports (Router tab)
+  info TEXT,                      -- JSON snapshot: identity, uptime, load, interfaces, ports (Router tab)
+  via_unit TEXT                   -- for a unit reached through another unit's Wi-Fi backhaul (seen in the router's ARP table)
 );
 
 CREATE TABLE IF NOT EXISTS station_samples (
