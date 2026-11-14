@@ -42,6 +42,8 @@ async function renderUnit(mac) {
       <div>Backhaul</div><div>${d.backhaul.length ? d.backhaul.map((b) => `${esc(b.band)} GHz to ${esc(b.parent_name)} <span class="${rssiClass(b.rssi)}">${esc(b.rssi ?? "?")} dBm</span>`).join(" · ") : (u.role === "router" ? "– (main router)" : "none seen over Wi-Fi (cabled, or via a unit MeshLens can't read)")}</div>
     </div></div>
 
+  ${systemHtml(d)}
+
   <div class="card"><h3>Radios and networks</h3>
     ${tbl(["Interface", "Network", "Band", "Channel", "Width", "Power", "Devices", "Traffic now", "Noise", "Tx failures", "Rx errors", "Temp"],
       d.ifaces.filter((i) => i.type === "AP" || i.ssid || i.iface.startsWith("apcli")).map((i) => `<tr class="${i.role === "backhaul" ? "muted" : ""}">
@@ -76,6 +78,36 @@ async function renderUnit(mac) {
 
   <div class="card"><details><summary><b>Raw identity values</b> <span class="muted small">(as reported by the unit)</span></summary>
     <div class="table-scroll short"><table>${Object.entries(id).map(([k, v]) => `<tr><td class="mono">${esc(k)}</td><td class="mono wrap">${esc(v)}</td></tr>`).join("")}</table></div></details></div>`;
+  drawSystemCharts(d);
+}
+
+function systemHtml(d) {
+  const s = d.system || {};
+  if (!Object.keys(s).length) return "";
+  const v = (x, unit = "") => (x == null ? "–" : `${x}${unit}`);
+  const ct = s.conntrack != null && s.conntrack_max ? `${s.conntrack} of ${s.conntrack_max} (${(100 * s.conntrack / s.conntrack_max).toFixed(1)}%)` : "–";
+  return `<div class="card"><h3>System <span class="muted small">processor, memory and storage of the unit</span></h3>
+    <div class="sys-tiles">
+      <div><div class="big ${pctClass(s.cpu_pct, 60, 85)}">${v(s.cpu_pct, "%")}</div><div class="muted small">CPU busy${s.cores ? ` (${s.cores.length} cores)` : ""}</div></div>
+      <div><div class="big ${pctClass(s.max_core_pct, 80, 95)}">${v(s.max_core_pct, "%")}</div><div class="muted small">busiest core</div></div>
+      <div><div class="big ${pctClass(s.mem_used_pct, 75, 90)}">${v(s.mem_used_pct, "%")}</div><div class="muted small">memory used (${v(s.mem_avail_mb)} of ${v(s.mem_total_mb)} MB free)</div></div>
+      <div><div class="big ${pctClass(s.temp_c, 75, 85)}">${v(s.temp_c, " °C")}</div><div class="muted small">hottest chip sensor</div></div>
+      <div><div class="big">${v(s.load1)}</div><div class="muted small">load (1 min)</div></div>
+    </div>
+    <div class="kv kv-wide"><div>Per core</div><div>${s.cores ? s.cores.map((c, i) => `core ${i}: <span class="${pctClass(c, 80, 95)}">${c}%</span>`).join(" · ") : "–"}${s.softirq_pct != null ? ` <span class="muted small">(network packet work ${s.softirq_pct}% of all CPU time)</span>` : ""}</div>
+      <div>Connections tracked</div><div>${ct}</div>
+      <div>Storage</div><div>settings (/jffs) ${v(s.jffs_pct, "%")} · temporary (/tmp) ${v(s.tmp_pct, "%")}</div></div>
+    <div class="grid"><div><h4>CPU, last 24 h</h4><div id="sys-cpu" class="chart-box"></div></div>
+      <div><h4>Memory and temperature, last 24 h</h4><div id="sys-mem" class="chart-box"></div></div></div></div>`;
+}
+
+function drawSystemCharts(d) {
+  const h = d.system_history || {};
+  if (!$("#sys-cpu")) return;
+  Charts.time($("#sys-cpu"), { series: { "CPU": h.cpu_pct || [], "Busiest core": h.max_core_pct || [] }, type: "line", unit: "%", yMin: 0, yMax: 100,
+    height: 180, empty: "Appears after a few router polls." });
+  Charts.time($("#sys-mem"), { series: { "Memory used %": h.mem_used_pct || [], "Temperature °C": h.temp_c || [] }, type: "line", yMin: 0, yMax: 100,
+    height: 180, empty: "Appears after a few router polls." });
 }
 
 function settingsHtml(s) {

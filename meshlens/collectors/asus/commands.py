@@ -18,7 +18,9 @@ SETTINGS_KEYS = (
     + [f"wl{b}.{g}_{k}" for b in range(4) for g in (1, 2, 3) for k in ("bss_enabled", "ssid", "closed", "ifname")]
     + ["smart_connect_x", "emf_enable", "mr_enable_x", "upnp_enable", "wps_enable", "misc_http_x", "dmz_ip",
        "vts_enable_x", "dhcp_start", "dhcp_end", "dhcp_lease", "wan0_proto", "wan0_state_t", "wan0_ipaddr",
-       "sshd_enable", "sshd_port", "time_zone_x"]
+       "sshd_enable", "sshd_port", "time_zone_x",
+       # QoS (bufferbloat) and firmware-update state
+       "qos_enable", "qos_type", "qos_obw", "qos_ibw", "bwdpi_db_enable", "webs_state_flag", "webs_state_info"]
 )
 
 TOOLS = ["wl", "iw", "iwpriv", "iwconfig", "mwctl", "hostapd_cli", "wlanconfig", "cfg80211tool", "apstats"]
@@ -38,6 +40,12 @@ def unit_script(main: bool, first_poll: bool, full: bool) -> str:
         _nvram_block("identity", IDENTITY_KEYS),
         'echo "@@@ tools"; for t in ' + " ".join(TOOLS) + '; do p=$(which $t 2>/dev/null); echo "$t: ${p:-MISSING}"; done',
         'echo "@@@ uptime"; cat /proc/uptime /proc/loadavg 2>/dev/null',
+        # CPU time, memory, chip temperatures, connection tracking, storage (all read-only /proc and /sys files).
+        "echo \"@@@ cpu_stat\"; grep '^cpu' /proc/stat",
+        "echo \"@@@ meminfo\"; grep -E '^(MemTotal|MemFree|MemAvailable|Buffers|Cached):' /proc/meminfo",
+        'echo "@@@ thermal"; for z in /sys/class/thermal/thermal_zone*; do echo "$(cat $z/type 2>/dev/null) $(cat $z/temp 2>/dev/null)"; done',
+        'echo "@@@ conntrack"; cat /proc/sys/net/netfilter/nf_conntrack_count /proc/sys/net/netfilter/nf_conntrack_max 2>/dev/null',
+        'echo "@@@ df"; df -k /jffs /tmp 2>/dev/null',
         'echo "@@@ iw_dev"; iw dev 2>/dev/null',
         'echo "@@@ iwconfig"; iwconfig 2>/dev/null',
         'echo "@@@ net_dev"; cat /proc/net/dev',

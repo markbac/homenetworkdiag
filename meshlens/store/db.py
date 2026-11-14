@@ -128,6 +128,13 @@ CREATE TABLE IF NOT EXISTS air_scan (
 );
 CREATE INDEX IF NOT EXISTS air_scan_ts ON air_scan(ts);
 
+CREATE TABLE IF NOT EXISTS unit_samples (
+  ts REAL, unit TEXT, cpu_pct REAL, max_core_pct REAL, softirq_pct REAL, load1 REAL,
+  mem_used_pct REAL, mem_avail_mb INTEGER, mem_total_mb INTEGER, temp_c REAL,
+  conntrack INTEGER, conntrack_max INTEGER, jffs_pct INTEGER, tmp_pct INTEGER, uptime_s INTEGER
+);
+CREATE INDEX IF NOT EXISTS unit_samples_ts ON unit_samples(ts);
+
 CREATE TABLE IF NOT EXISTS daily_device_summary (
   day TEXT, mac TEXT, kicks INTEGER, roams INTEGER, connects INTEGER, disconnects INTEGER,
   min_rssi INTEGER, max_rssi INTEGER,
@@ -274,7 +281,7 @@ def prune(raw_days: int, summary_days: int, now: float | None = None) -> None:
     with _write_lock:
         c = conn()
         for t in ("station_samples", "radio_samples", "iface_counters", "events", "unit_settings", "inventory_events",
-                  "plc_rates", "ping_minutes", "host_lan", "air_scan"):
+                  "plc_rates", "ping_minutes", "host_lan", "air_scan", "unit_samples"):
             c.execute(f"DELETE FROM {t} WHERE ts < ?", (cut,))
         day_cut = time.strftime("%Y-%m-%d", time.localtime(now - summary_days * 86400))
         c.execute("DELETE FROM daily_device_summary WHERE day < ?", (day_cut,))
@@ -576,3 +583,11 @@ def add_speed_tests(rows: list[dict[str, Any]]) -> int:
             n += 1
         c.commit()
     return n
+
+
+def unit_samples_since(since: float, unit: str | None = None) -> list[dict[str, Any]]:
+    q, args = "SELECT * FROM unit_samples WHERE ts >= ?", [since]
+    if unit:
+        q += " AND unit = ?"
+        args.append(unit)
+    return _rows(conn().execute(q + " ORDER BY ts", args))

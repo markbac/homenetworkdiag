@@ -84,6 +84,7 @@ class AsusCollector:
         self.runner = runner
         self.seen_units: set[str] = set()   # units already polled once (rotated log read on first poll only)
         self.last_full = 0.0
+        self.prev_cpu: dict[str, dict[str, list[int]]] = {}   # last /proc/stat per unit, for CPU %
         self.status: dict[str, Any] = {"last_poll": None, "units": {}, "error": None}
 
     # ------------------------------------------------------------ polling
@@ -143,7 +144,7 @@ class AsusCollector:
                 alias="Main router" if r.main else (aliases.get(r.mac) or {}).get("alias"),
                 parent_hint=None if r.main else (aliases.get(r.mac) or {}).get("prefer_parent"),
                 reachable=1 if r.ok else 0, last_seen=now if r.ok else None, last_error=r.error or "",
-                info=json.dumps({**r.info, "ts": now}, default=str) if r.ok else None,
+                info=json.dumps({**r.info, "ts": now, "system": self._system(r, now)}, default=str) if r.ok else None,
                 macs=json.dumps(sorted({r.mac, *(i["addr"] for i in P.parse_iw_dev(r.sections.get("iw_dev", "")) if i.get("addr")),
                                         *backhaul.get(r.mac, {}).values()})) if r.ok else None)
             if not r.ok:
@@ -218,6 +219,31 @@ class AsusCollector:
                 fields = {"randomised": 1 if P.is_randomised(mac) else 0}
                 self._enrich(fields, mac, nmp, leases, table)
                 db.upsert_device(mac, d.get("conn_ts") or now, **fields)
+
+    def _system(self, r: UnitResult, now: float) -> dict[str, Any]:
+        """CPU (from the change since the last poll), memory, temperature, conntrack, storage; stored per poll."""
+        s = r.sections
+        cur = P.parse_proc_stat(s.get("cpu_stat", ""))
+        sysd: dict[str, Any] = {**P.parse_meminfo(s.get("meminfo", "")), **P.parse_conntrack(s.get("conntrack", "")),
+                                **P.parse_df(s.get("df", ""))}
+        th = P.parse_thermal(s.get("thermal", ""))
+        if th:
+            sysd["temp_c"] = th["temp_c"]
+        prev = self.prev_cpu.get(r.mac)
+        if cur:
+            if prev:
+                u = P.cpu_usage(prev, cur)
+                if u:
+                    sysd.update(u)
+            self.prev_cpu[r.mac] = cur
+        load = r.info.get("load")
+        if load:
+            sysd["load1"] = load[0]
+        if sysd:
+            db.insert_many("unit_samples", [{"ts": now, "unit": r.mac, **{k: sysd.get(k) for k in (
+                "cpu_pct", "max_core_pct", "softirq_pct", "load1", "mem_used_pct", "mem_avail_mb", "mem_total_mb",
+                "temp_c", "conntrack", "conntrack_max", "jffs_pct", "tmp_pct")}, "uptime_s": r.info.get("uptime_s")}])
+        return sysd
 
     @staticmethod
     def _enrich(fields: dict[str, Any], mac: str, nmp: dict[str, Any], leases: dict[str, Any],

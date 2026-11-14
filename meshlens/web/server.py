@@ -439,6 +439,18 @@ async def export_get(request: web.Request) -> web.StreamResponse:
         return web.json_response({"error": "'from' must be before 'to'"}, status=400)
     fmt = q.get("format", "csv")
     stamp = time.strftime("%Y%m%d-%H%M", time.localtime(t0)) + "_" + time.strftime("%Y%m%d-%H%M", time.localtime(t1))
+    if fmt == "json" and len(keys) > 1:
+        resp = web.StreamResponse(headers={"Content-Type": "application/json; charset=utf-8",
+                                           "Content-Disposition": f'attachment; filename="meshlens_{stamp}.json"'})
+        await resp.prepare(request)
+        it = export.json_multi_chunks(keys, t0, t1)
+        while True:
+            chunk = await asyncio.to_thread(lambda: next(it, None))
+            if chunk is None:
+                break
+            await resp.write(chunk)
+        await resp.write_eof()
+        return resp
     if fmt == "zip" or len(keys) > 1:
         body = await asyncio.to_thread(export.zip_file, keys, t0, t1)
         return web.Response(body=body, content_type="application/zip",

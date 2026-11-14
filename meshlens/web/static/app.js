@@ -404,7 +404,9 @@ const SECTIONS = [
     { k: "crowded_clients_24", label: "Crowded 2.4 GHz radio: devices", type: "number" },
     { k: "flood_pps", label: "Broadcast/multicast flood at (packets/s at this PC)", type: "number" },
     { k: "channel_busy_pct", label: "Channel busy at (% from the access point's report)", type: "number" },
-    { k: "crowded_neighbours", label: "Crowded channel: neighbouring networks", type: "number" }, { k: "watched_offline_hours", label: "Watched device missing after (hours)", type: "number" }] },
+    { k: "crowded_neighbours", label: "Crowded channel: neighbouring networks", type: "number" },
+    { k: "unit_cpu_pct", label: "Mesh unit CPU busy at (%)", type: "number" }, { k: "unit_mem_pct", label: "Mesh unit memory full at (%)", type: "number" },
+    { k: "unit_temp_c", label: "Mesh unit too hot at (°C)", type: "number" }, { k: "conntrack_pct", label: "Connection table full at (%)", type: "number" }, { k: "watched_offline_hours", label: "Watched device missing after (hours)", type: "number" }] },
   { id: "retention", title: "Data kept", help: "set-data", note: "Older data is deleted hourly.", fields: [
     { k: "raw_days", label: "Detailed data (days)", type: "number" }, { k: "summary_days", label: "Daily summaries (days)", type: "number" }] },
   { id: "web", title: "Web interface", help: "set-web", note: "Changes take effect after MeshLens restarts (tray icon → Quit, then start it again).", fields: [
@@ -554,7 +556,7 @@ async function renderExport(el) {
     <p><label class="inline">Format <select name="format"><option value="csv">CSV (Excel)</option><option value="json">JSON</option><option value="zip">ZIP of CSVs</option></select></label>
       <button type="submit">Download</button> <span id="exp-msg" class="muted small"></span></p>
     <p class="muted small">Detailed data is kept for ${esc(settingsData.retention.raw_days)} days and daily summaries for ${esc(settingsData.retention.summary_days)} days.
-      Choosing several datasets downloads one ZIP with a CSV each. Device and unit names are added next to MAC addresses.</p></form>`;
+      Several datasets: CSV comes as a ZIP with one CSV each; JSON comes as one file with every dataset. Device and unit names are added next to MAC addresses.</p></form>`;
   const f = $("#exp-form");
   el.querySelectorAll("[data-range]").forEach((b) => (b.onclick = () => { const n = new Date(); f.to.value = iso(n); f.from.value = iso(new Date(n - b.dataset.range * 86400000)); }));
   f.onsubmit = (ev) => {

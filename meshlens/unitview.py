@@ -59,6 +59,7 @@ def detail(mac: str) -> dict[str, Any] | None:
     ifaces.sort(key=lambda x: (x.get("band") or "z", x["iface"]))
 
     settings = db.latest_settings().get(mac) or {}
+    hist = db.unit_samples_since(now - 86400, mac)
     return {
         "unit": {k: u.get(k) for k in ("mac", "alias", "model", "productid", "ip", "role", "chip", "firmware", "reachable",
                                        "last_seen", "last_error")},
@@ -74,4 +75,7 @@ def detail(mac: str) -> dict[str, Any] | None:
                             "band": s.get("band"), "rssi": s.get("rssi"), "tx_rate": s.get("tx_rate")} for s in clients],
                           key=lambda c: (c["band"] or "", -(c["rssi"] or -999))),
         "counters": [{"iface": k, **v} for k, v in sorted(rates.items())],
+        "system": info.get("system") or {},
+        "system_history": {k: [[h["ts"], h[k]] for h in hist if h.get(k) is not None]
+                           for k in ("cpu_pct", "max_core_pct", "mem_used_pct", "temp_c", "load1", "conntrack")},
     }

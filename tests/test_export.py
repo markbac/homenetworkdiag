@@ -79,3 +79,21 @@ def test_csv_columns_cover_optional_details(tmp_home):
     text = b"".join(export.csv_chunks("events", now - 3600, now + 1)).decode("utf-8-sig")
     rec = list(csv.DictReader(io.StringIO(text)))
     assert rec[0]["kind"] == "connect" and rec[1]["detail_rssi"] == "-77"
+
+
+def test_export_json_several_datasets_is_one_json_file(tmp_home):
+    from tests.test_web import FakeEngine
+    from meshlens.web.auth import Auth
+    from meshlens.web.server import build_app
+    now = seed()
+
+    async def scenario():
+        auth = Auth(tmp_home / "web_auth.json")
+        auth.set_password("a-long-password")
+        async with TestClient(TestServer(build_app(FakeEngine(), auth))) as c:
+            await c.post("/api/auth/login", json={"password": "a-long-password"})
+            r = await c.get(f"/api/export?d=events,devices&from={now - 3600}&to={now + 1}&format=json")
+            assert r.headers["Content-Type"].startswith("application/json") and ".json" in r.headers["Content-Disposition"]
+            doc = json.loads(await r.read())
+            assert set(doc["datasets"]) == {"events", "devices"}
+    asyncio.run(scenario())

@@ -41,9 +41,18 @@ NETWORK_KEYS: list[tuple[str, str, Any, str]] = [
     ("dhcp_lease", "DHCP lease time (s)", None, "How long a device keeps its address."),
     ("wan0_proto", "Internet connection type", None, ""),
     ("wan0_state_t", "Internet connection state", {"0": "initialising", "1": "connecting", "2": "connected", "3": "disconnected", "4": "stopped"}, ""),
+    ("qos_enable", "QoS", ON_OFF, "Keeps latency low when the line is busy; the fix for bufferbloat."),
+    ("qos_type", "QoS type", {"0": "Traditional", "1": "Adaptive", "2": "Bandwidth limiter", "3": "Cake/FQ"},
+     "Adaptive or Traditional QoS with bandwidth set to ~90% of your measured speeds."),
+    ("qos_obw", "QoS upload bandwidth (kbit/s)", {"0": "automatic"}, "Should be ~90% of the router speed test's upload."),
+    ("qos_ibw", "QoS download bandwidth (kbit/s)", {"0": "automatic"}, "Should be ~90% of the router speed test's download."),
+    ("bwdpi_db_enable", "Traffic Analyzer statistics", ON_OFF, ""),
     ("wan0_ipaddr", "Internet (WAN) address", None, "100.64.x.x-100.127.x.x means carrier-grade NAT: port forwarding won't work."),
 ]
 ADMIN_KEYS: list[tuple[str, str, Any, str]] = [
+    ("webs_state_flag", "Firmware update", {"0": "up to date", "1": "update available", "2": "update available (important)"},
+     "Checked by the router itself."),
+    ("webs_state_info", "Newest firmware the router knows of", None, ""),
     ("wps_enable", "WPS", ON_OFF, "Rarely needed and a known weak point."),
     ("misc_http_x", "Web admin from the internet", ON_OFF, "Should be off."),
     ("sshd_enable", "SSH", {"0": "off", "1": "LAN only", "2": "LAN and internet"}, "MeshLens needs LAN only."),

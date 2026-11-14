@@ -183,6 +183,26 @@
     every raw value MeshLens reads. Change settings in the ASUS app or web UI; MeshLens never does.</li>
 </ul>
 
+<h3 id="unit-system">System: processor, memory and more</h3>
+<p>Every minute MeshLens reads each unit's processor time, memory, chip temperatures, connection table and storage (standard
+  read-only Linux files). <b>CPU busy</b> is the share of time the processor was working; <b>busiest core</b> matters because
+  network packet work often lands on one core, so one maxed-out core can slow traffic while the average looks fine.
+  <b>Memory used</b> counts what the system can't free. <b>Connections tracked</b> is the router's table of active connections
+  (NAT); when it is full, new connections fail. Restarts are spotted when a unit's uptime goes back to zero.</p>
+
+<h3 id="issue-unit_cpu_high">Processor very busy</h3><p>The unit's CPU (or one core) is busy most of the time. Restart it if it has been up for
+  weeks, update the firmware, and turn off router features you don't use (Traffic Analyzer, AiProtection).</p>
+<h3 id="issue-unit_mem_high">Low on memory</h3><p>Most memory is in use; the router may drop connections or restart services. Restart; if it
+  fills again within days, update the firmware.</p>
+<h3 id="issue-unit_hot">Chip hot</h3><p>The hottest temperature sensor is high. Give the unit space and airflow.</p>
+<h3 id="issue-conntrack_full">Connection table nearly full</h3><p>New connections will fail. A device opening huge numbers of connections
+  (file sharing, a misbehaving camera) is the usual cause.</p>
+<h3 id="issue-unit_storage_full">Storage full</h3><p>Logs or settings can't be written. A restart clears temporary storage.</p>
+<h3 id="issue-unit_restarted">Unit restarted</h3><p>Its uptime went back to zero. Unplanned restarts point at power, heat, memory or firmware.</p>
+<h3 id="issue-firmware_update">Firmware update available</h3><p>The router itself reports a newer firmware. Update from the ASUS app or web UI.</p>
+<h3 id="issue-qos_off">QoS off while bufferbloat is high</h3><p>Turn on Adaptive QoS with the bandwidth set to about 90% of the router speed
+  test's results; that keeps games and calls responsive while someone uploads or downloads.</p>
+
 <h2 id="hostpc">This PC as a network sensor</h2>
 <p>MeshLens uses the PC it runs on to measure what the routers don't report:</p>
 <dl>

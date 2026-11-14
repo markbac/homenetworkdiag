@@ -28,6 +28,7 @@ DATASETS: dict[str, tuple[str, str | None, str | None]] = {
     "lan": ("Broadcast / multicast at this PC", "host_lan", "ts"),
     "powerline": ("Powerline link rates", "plc_rates", "ts"),
     "inventory": ("Inventory changes (new devices, ports opened/closed)", "inventory_events", "ts"),
+    "system": ("Mesh units: CPU, memory, temperature, connections, storage", "unit_samples", "ts"),
     "daily": ("Daily device summaries (kept 12 months)", "daily_device_summary", "day"),
     "devices": ("Device list with your notes (current)", None, None),
 }
@@ -124,6 +125,19 @@ def json_chunks(key: str, t0: float, t1: float) -> Iterator[bytes]:
         yield (b"" if first else b",\n") + json.dumps(r, default=str).encode()
         first = False
     yield b"]}\n"
+
+
+def json_multi_chunks(keys: list[str], t0: float, t1: float) -> Iterator[bytes]:
+    """Several datasets as one JSON document: {"from", "to", "datasets": {key: [rows]}}."""
+    yield b'{"from": ' + json.dumps(t0).encode() + b', "to": ' + json.dumps(t1).encode() + b', "datasets": {'
+    for i, k in enumerate(keys):
+        yield (b", " if i else b"") + json.dumps(k).encode() + b": ["
+        first = True
+        for r in rows(k, t0, t1):
+            yield (b"" if first else b",\n") + json.dumps(r, default=str).encode()
+            first = False
+        yield b"]"
+    yield b"}}\n"
 
 
 def zip_file(keys: list[str], t0: float, t1: float) -> bytes:
