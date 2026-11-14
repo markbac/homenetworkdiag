@@ -199,6 +199,19 @@
   (file sharing, a misbehaving camera) is the usual cause.</p>
 <h3 id="issue-unit_storage_full">Storage full</h3><p>Logs or settings can't be written. A restart clears temporary storage.</p>
 <h3 id="issue-unit_restarted">Unit restarted</h3><p>Its uptime went back to zero. Unplanned restarts point at power, heat, memory or firmware.</p>
+<h3 id="issue-radar_dfs">Radar forced 5 GHz off its channel</h3>
+<p>5 GHz channels 52-144 are DFS channels, shared with weather and other radar. When a unit detects radar it must leave the channel
+  immediately and listen on the new one for a minute before transmitting, so every 5 GHz device on that unit drops or stalls, and a
+  5 GHz backhaul moves too. Choose a 5 GHz channel from 36-48 to avoid it. MeshLens reads these events from the units' own logs.</p>
+<h3 id="issue-dfs_channel">Unit on a DFS channel</h3><p>Not a problem by itself, but radar nearby would force it off; see above.</p>
+<h3 id="issue-channel_hopping">Keeps changing channel</h3><p>Each change drops or stalls devices on that band. Pick a fixed, quiet channel.</p>
+<h3 id="issue-link_flap">Wired port dropped and reconnected</h3><p>Linux counts every time a wired link goes down and up. Causes: a loose or
+  damaged cable, a device or switch restarting or losing power, a powerline adapter resetting, or on the internet port the modem restarting.</p>
+<h3 id="issue-iface_errors">Errors on a wired port</h3><p>Damaged frames on a cable: swap it for a known-good one and check the connectors.</p>
+<h3 id="issue-wan_reconnect">Internet reconnected</h3><p>The router's internet address changed, so the connection to the ISP dropped and
+  came back. Occasional reconnects are normal (some ISPs do it nightly); frequent ones are worth reporting with the times.</p>
+<h3 id="issue-unit_restarted_log">Unit was restarted</h3><p>The unit's log shows a deliberate restart (the firmware's housekeeping, the ASUS
+  app, or a schedule) rather than a crash.</p>
 <h3 id="issue-firmware_update">Firmware update available</h3><p>The router itself reports a newer firmware. Update from the ASUS app or web UI.</p>
 <h3 id="issue-qos_off">QoS off while bufferbloat is high</h3><p>Turn on Adaptive QoS with the bandwidth set to about 90% of the router speed
   test's results; that keeps games and calls responsive while someone uploads or downloads.</p>

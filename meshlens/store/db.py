@@ -65,7 +65,9 @@ CREATE TABLE IF NOT EXISTS radio_samples (
 CREATE INDEX IF NOT EXISTS radio_ts ON radio_samples(ts);
 
 CREATE TABLE IF NOT EXISTS iface_counters (
-  ts REAL, unit TEXT, iface TEXT, rx_bytes INTEGER, tx_bytes INTEGER
+  ts REAL, unit TEXT, iface TEXT, rx_bytes INTEGER, tx_bytes INTEGER,
+  rx_packets INTEGER, tx_packets INTEGER, rx_errs INTEGER, rx_drop INTEGER, tx_errs INTEGER, tx_drop INTEGER,
+  carrier_changes INTEGER
 );
 CREATE INDEX IF NOT EXISTS iface_ts ON iface_counters(ts);
 

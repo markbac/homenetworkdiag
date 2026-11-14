@@ -9,7 +9,9 @@ const rssiClass = (r) => r == null ? "" : r >= -60 ? "good" : r >= -70 ? "" : r 
 const scoreClass = (s) => s == null ? "muted" : s >= 80 ? "good" : s >= 60 ? "warn" : "bad";
 const bandLabel = (b) => b ? `${b} GHz` : "wired";
 const KIND = { connect: "Connected", disconnect: "Disconnected", kick: "Kicked (weak signal)", roam_candidate: "Roam attempt",
-  roam: "Roam result", moved_away: "Moved to another unit", leave: "Left (signal)", assoc_failed: "Association failed" };
+  roam: "Roam result", moved_away: "Moved to another unit", leave: "Left (signal)", assoc_failed: "Association failed",
+  radar: "Radar detected (DFS)", channel_change: "Channel changed", channel_replan: "Channel re-planned", unit_reboot: "Unit restarted",
+  link_change: "Wired link down/up", wan_ip_change: "Internet reconnected" };
 const SEV = { high: "High", medium: "Medium", low: "Low", info: "Info" };
 
 let unitsByMac = {}, devicesByMac = {};
@@ -308,7 +310,8 @@ function drawDaily(canvas, rows) {
 
 // ---------------------------------------------------------------- events
 const EV_CLASS = { kick: "kick", disconnect: "disconnect", leave: "disconnect", connect: "connect", roam_candidate: "roam", roam: "roam",
-  moved_away: "roam", assoc_failed: "assoc_failed" };
+  moved_away: "roam", assoc_failed: "assoc_failed", radar: "unit", channel_change: "unit", channel_replan: "unit", unit_reboot: "unit",
+  link_change: "unit", wan_ip_change: "unit" };
 
 async function loadEvents() {
   const { devs, units } = await refreshBase();
@@ -325,11 +328,22 @@ async function loadEvents() {
   $("#ev-count").textContent = `${rows.length} event${rows.length === 1 ? "" : "s"}`;
   $("#events-table").innerHTML = "<thead><tr><th>Time</th><th>Device</th><th>Event</th><th>Unit</th><th>Band</th><th>Detail</th></tr></thead><tbody>" +
     rows.map((e) => `<tr class="ev ev-${EV_CLASS[e.kind] || "other"}"><td class="muted small">${esc(fmtTime(e.ts))}</td>
-      <td><a href="#" data-mac="${esc(e.mac)}">${esc(devName(e.mac))}</a></td>
+      <td>${e.mac ? `<a href="#" data-mac="${esc(e.mac)}">${esc(devName(e.mac))}</a>` : '<span class="muted">(the unit itself)</span>'}</td>
       <td><span class="evk ek-${EV_CLASS[e.kind] || "other"}">${esc(KIND[e.kind] || e.kind)}</span></td><td>${esc(unitName(e.unit))}</td>
       <td>${e.band ? `<span class="pill b${esc(String(e.band).replace(".", ""))}">${esc(bandLabel(e.band))}</span>` : ""}</td>
-      <td class="wrap small">${e.detail.rssi != null ? `<span class="${rssiClass(e.detail.rssi)}">${esc(e.detail.rssi)} dBm</span> ` : ""}${e.detail.target ? "→ " + esc(unitName(e.detail.target)) + (e.detail.target_rssi != null ? ` (${esc(e.detail.target_rssi)} dBm) ` : " ") : ""}${e.detail.new_unit ? "→ " + esc(unitName(e.detail.new_unit)) : ""}${e.detail.status != null ? " status " + esc(e.detail.status) : ""}</td></tr>`).join("")
+      <td class="wrap small">${e.detail.rssi != null ? `<span class="${rssiClass(e.detail.rssi)}">${esc(e.detail.rssi)} dBm</span> ` : ""}${e.detail.target ? "→ " + esc(unitName(e.detail.target)) + (e.detail.target_rssi != null ? ` (${esc(e.detail.target_rssi)} dBm) ` : " ") : ""}${e.detail.new_unit ? "→ " + esc(unitName(e.detail.new_unit)) : ""}${e.detail.status != null ? " status " + esc(e.detail.status) : ""}${unitDetail(e)}</td></tr>`).join("")
     + (rows.length ? "" : '<tr><td colspan="6" class="muted">No events match.</td></tr>') + "</tbody>";
+}
+
+function unitDetail(e) {
+  const d = e.detail || {};
+  if (e.kind === "radar") return `channel ${esc(d.channel)}`;
+  if (e.kind === "channel_change") return d.from_channel != null ? `${esc(d.band || "")} GHz ${esc(d.from_channel)} → ${esc(d.to_channel)}${d.width ? ` (${esc(d.width)} MHz)` : ""}` : `→ channel ${esc(d.to_channel)} (radar)`;
+  if (e.kind === "channel_replan") return `channel ${esc(d.channel)}, ${esc(d.bw)} MHz${d.unavailable ? `, avoiding ${esc(d.unavailable)}` : ""}`;
+  if (e.kind === "unit_reboot") return d.by ? `requested by ${esc(d.by)}` : "";
+  if (e.kind === "link_change") return `${esc(e.iface)}: ${esc(d.changes)} change${d.changes > 1 ? "s" : ""}, now ${esc(d.state || "?")}${d.speed ? ` ${esc(d.speed)} Mbit/s` : ""}`;
+  if (e.kind === "wan_ip_change") return "new internet address";
+  return "";
 }
 
 function showDeviceEvents(mac) {

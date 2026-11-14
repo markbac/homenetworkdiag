@@ -293,6 +293,105 @@ def net_issues(net: dict[str, Any], devs: dict[str, dict[str, Any]], now: float)
                     ["If you didn't restart it, check its power supply and temperature, and update the firmware."],
                     restarts[0], restarts[-1], count=len(restarts)))
 
+    # ------------------------------------------------ radar, channel changes, wired links, internet reconnects
+    uev = net.get("unit_events") or []
+    by_kind: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for e in uev:
+        by_kind[e["kind"]].append(e)
+    radar = sorted(by_kind.get("radar", []), key=lambda e: e["ts"])
+    if radar:
+        moves = {e["unit"]: e for e in by_kind.get("channel_change", [])}
+        lines = []
+        for e in radar[-5:]:
+            mv = next((c for c in by_kind.get("channel_change", []) if c["unit"] == e["unit"] and 0 <= c["ts"] - e["ts"] < 120), None)
+            lines.append(f"{_hm(e['ts'])} {names.get(e['unit'], e['unit'])} on channel {e['detail'].get('channel')}"
+                         + (f" → moved to {mv['detail'].get('to_channel')}" if mv else ""))
+        out.append(_issue(
+            "radar_dfs", "medium", "network", "radar", f"Radar forced 5 GHz off its channel {len(radar)} time{'s' if len(radar) > 1 else ''}",
+            "; ".join(lines) + ".",
+            "5 GHz channels 52-144 are shared with weather and other radar (DFS channels). When a unit detects radar it must leave "
+            "the channel at once and check the new one for a minute before using it, so every 5 GHz device on it drops or "
+            "stalls, and a 5 GHz mesh backhaul moves too.",
+            ["Set 5 GHz to a channel from 36-48 (no radar checks) in the ASUS app or web UI (Wireless → General → 5 GHz → "
+             "Control channel), so radar can't knock it off.",
+             "If the units' 5 GHz backhaul is also on a DFS channel, prefer 6 GHz or Ethernet backhaul where possible."],
+            radar[0]["ts"], radar[-1]["ts"], count=len(radar)))
+    for u in net.get("units") or []:
+        for i in (u.get("info") or {}).get("ifaces") or []:
+            ch = i.get("channel") or 0
+            if i.get("band") == "5" and 52 <= ch <= 144 and not i["iface"].startswith("apcli") and not radar:
+                out.append(_issue(
+                    "dfs_channel", "low", "unit", f"{u['mac']}-dfs", f"{names.get(u['mac'], u['mac'])} uses DFS channel {ch} on 5 GHz",
+                    f"Channel {ch} is a radar (DFS) channel.",
+                    "If radar is detected nearby, the unit must leave the channel immediately and every 5 GHz device drops for "
+                    "about a minute.", ["Prefer channels 36-48 on 5 GHz unless you need the extra width."]))
+                break
+    changes = [e for e in by_kind.get("channel_change", []) if e["detail"].get("from_channel") is not None]
+    by_unit_ch: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for e in changes:
+        by_unit_ch[e["unit"]].append(e)
+    for unit, es in by_unit_ch.items():
+        if len(es) >= 3:
+            out.append(_issue(
+                "channel_hopping", "medium", "unit", unit, f"{names.get(unit, unit)} keeps changing channel",
+                f"{len(es)} channel changes, last {_hm(es[-1]['ts'])}: "
+                + ", ".join(f"{e['detail'].get('band')} GHz {e['detail'].get('from_channel')}→{e['detail'].get('to_channel')}" for e in es[-4:]) + ".",
+                "Each change briefly drops or stalls the devices on that band. Auto channel selection reacting to "
+                "interference, or radar on DFS channels, causes it.",
+                ["Pick a fixed, quiet channel (the air survey shows how busy each is)."], es[0]["ts"], es[-1]["ts"], count=len(es)))
+    flaps: dict[tuple, list[dict[str, Any]]] = defaultdict(list)
+    for e in by_kind.get("link_change", []):
+        flaps[(e["unit"], e.get("iface"))].append(e)
+    for (unit, iface), es in flaps.items():
+        n = sum(e["detail"].get("changes", 1) for e in es)
+        out.append(_issue(
+            "link_flap", "medium" if n >= 4 else "low", "unit", f"{unit}-{iface}",
+            f"Wired port {iface} on {names.get(unit, unit)} dropped and reconnected",
+            f"{n} link change{'s' if n > 1 else ''}, last {_hm(es[-1]['ts'])}" +
+            (f" (now {es[-1]['detail'].get('state')}, {es[-1]['detail'].get('speed')} Mbit/s)" if es[-1]["detail"].get("speed") else "") + ".",
+            "A wired link going down and up means a loose or damaged cable, a device or switch restarting or losing power, "
+            "or a powerline adapter resetting. Everything behind that port drops each time.",
+            ["Reseat or swap the cable; check what is plugged into that port (and whether it restarted).",
+             "If it is the internet (WAN) port, the modem/ONT may be restarting: check its lights and power."],
+            es[0]["ts"], es[-1]["ts"], count=n))
+    wan = by_kind.get("wan_ip_change", [])
+    if wan:
+        out.append(_issue(
+            "wan_reconnect", "medium" if len(wan) > 1 else "info", "network", "wan",
+            "The internet connection reconnected" + (f" {len(wan)} times" if len(wan) > 1 else ""),
+            "Your internet address changed at " + ", ".join(_hm(e["ts"]) for e in wan[-5:]) + ".",
+            "A new address means the line or the router's connection to the ISP dropped and came back: every call, game and "
+            "download is cut at that moment.",
+            ["If it happens more than occasionally, note the times and report them to your ISP.",
+             "Check the internet (WAN) port for link changes on the Router tab."], wan[0]["ts"], wan[-1]["ts"], count=len(wan)))
+    for e in by_kind.get("unit_reboot", []):
+        who = e["detail"].get("by")
+        out.append(_issue(
+            "unit_restarted_log", "info", "unit", f"{e['unit']}-reboot-{int(e['ts'])}", f"{names.get(e['unit'], e['unit'])} was restarted",
+            f"Restart requested at {_hm(e['ts'])}" + (f" by the firmware's '{who}' service" if who else "") + ".",
+            "A deliberate restart (by the firmware, the ASUS app or a schedule), not a crash.",
+            ["Nothing to do unless it happens often; ASUS's automatic restarts can be scheduled at night."], e["ts"], e["ts"]))
+    # Errors and drops on wired interfaces over the period.
+    rows_by: dict[tuple, list[dict[str, Any]]] = defaultdict(list)
+    for c in net.get("iface_counters") or []:
+        if c.get("rx_errs") is not None:
+            rows_by[(c["unit"], c["iface"])].append(c)
+    from .collectors.asus.parsers import is_wired
+    for (unit, iface), rs in rows_by.items():
+        if not is_wired(iface) or len(rs) < 2:
+            continue
+        a, b = rs[0], rs[-1]
+        errs = sum(max(0, (b.get(k) or 0) - (a.get(k) or 0)) for k in ("rx_errs", "tx_errs"))
+        pkts = max(1, (b.get("rx_packets") or 0) - (a.get("rx_packets") or 0) + (b.get("tx_packets") or 0) - (a.get("tx_packets") or 0))
+        if errs >= 50 and errs / pkts >= 0.0005:
+            out.append(_issue(
+                "iface_errors", "medium" if errs / pkts >= 0.005 else "low", "unit", f"{unit}-{iface}-errs",
+                f"Errors on wired port {iface} ({names.get(unit, unit)})",
+                f"{errs} errors in {pkts} packets ({100 * errs / pkts:.2f}%) over the period.",
+                "Errors on a wired link mean damaged frames: usually a poor cable or connector, a cable that is too long, or "
+                "electrical interference; on the WAN port it can be the modem.",
+                ["Swap the cable for a known-good one (Cat 5e or better) and check both connectors."]))
+
     # ------------------------------------------------ settings that matter for speed (main router)
     main = next((u for u, n in names.items() if n == "Main router"), None)
     s = (net.get("settings") or {}).get(main or "", {})

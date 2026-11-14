@@ -189,6 +189,24 @@ def parse_df(text: str) -> dict[str, Any]:
     return {k: v for k, v in out.items() if k in ("jffs_pct", "tmp_pct")}
 
 
+def parse_links(text: str) -> dict[str, dict[str, Any]]:
+    """``<iface> <carrier_changes> <operstate> <speed>`` per line."""
+    out = {}
+    for line in text.splitlines():
+        p = line.split()
+        if len(p) >= 2 and p[1].isdigit():
+            out[p[0]] = {"changes": int(p[1]), "state": p[2] if len(p) > 2 else None,
+                         "speed": int(p[3]) if len(p) > 3 and p[3].lstrip("-").isdigit() and int(p[3]) > 0 else None}
+    return out
+
+
+WIRED_PREFIXES = ("eth", "lan", "wan", "ppp")
+
+
+def is_wired(iface: str) -> bool:
+    return iface.startswith(WIRED_PREFIXES) and "." not in iface
+
+
 def parse_uptime(text: str) -> dict[str, Any]:
     """``cat /proc/uptime /proc/loadavg``: seconds up, then load averages."""
     lines = [l.split() for l in text.splitlines() if l.strip()]
@@ -449,6 +467,12 @@ _EVENT_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("leave", re.compile(rf"vap-\d+\((?P<iface>\w+)\): \[(?P<mac>{MAC_RE})\]_ieee80211_node_leave: station with aid \d+ , "
                          rf"rssi=(?P<rssi>-?\d+)")),
     ("assoc_failed", re.compile(r"vap-\d+\((?P<iface>\w+)\):wlan_mlme_assoc_resp assoc failed with status (?P<status>\d+)")),
+    # Unit-level events (no device): radar on a DFS channel, the forced channel change, channel re-planning, restarts.
+    ("radar", re.compile(r"Radar found on channel=(?P<channel>\d+)")),
+    ("channel_change", re.compile(r"ieee80211_dfs_action: Changing to DFS chan (?P<to_channel>\d+)")),
+    ("channel_replan", re.compile(r"trigger acs word\((?P<iface>\w+)\) channel\((?P<channel>\d+)\) bw\((?P<bw>\d+)\)"
+                                  r"(?: unavbl_ch\((?P<unavailable>[\d,]+)\))?")),
+    ("unit_reboot", re.compile(r"current \[reboot\] parent \[[\w.-]+\],\[(?P<by>[\w.-]+)\]")),
 ]
 
 
@@ -479,9 +503,14 @@ def parse_log_events(text: str, unit: str, now: datetime | None = None) -> list[
             for k in ("target", "new_unit"):
                 if k in g:
                     detail[k] = norm_mac(g.pop(k))
-            for k in ("target_rssi", "rssi", "status"):
+            if "crash_log" in line:        # the boot-time copy of an earlier line, with no real clock time
+                break
+            for k in ("target_rssi", "rssi", "status", "channel", "to_channel", "bw"):
                 if k in g:
                     detail[k] = int(g.pop(k))
+            for k in ("unavailable", "by"):
+                if k in g:
+                    detail[k] = g.pop(k)
             iface = g.pop("iface", None)
             if iface and iface.startswith("initiator="):
                 detail["initiator"] = iface.split("=", 1)[1]
