@@ -33,6 +33,7 @@ class Engine:
         self.speed_status: dict[str, Any] = {"running": False, "last": None}
         self.update_info: dict[str, Any] = {"available": False, "current": updater.__version__, "checked": None,
                                             "state": None, "error": None, "self_update": updater.can_self_update()}
+        self.advertiser = None  # mDNS announcement (meshlens.local), started with the web server
         self.on_quit = None   # set by the tray: called after the installer has been started
         self._isp_hop: tuple[float, tuple[str, int] | None] = (0.0, None)
         self._stop = threading.Event()
@@ -57,6 +58,8 @@ class Engine:
         self._wake.set()
         self.monitor.stop()
         self.discovery.stop()
+        if getattr(self, "advertiser", None):
+            self.advertiser.stop()
         if self._thread:
             self._thread.join(timeout=10)
 
@@ -92,8 +95,27 @@ class Engine:
 
     def topology(self) -> dict[str, Any]:
         now = time.time()
-        return topology.build(db.units(), db.devices(), db.station_samples_since(now - 900), db.plc_adapters(),
-                              db.plc_latest_rates(), self.analysis(24), now)
+        t = topology.build(db.units(), db.devices(), db.station_samples_since(now - 900), db.plc_adapters(),
+                           db.plc_latest_rates(), self.analysis(24), now)
+        # Extra facts drawn on the diagram.
+        from . import graphs
+        speeds = [x for x in db.speed_tests(now - 7 * 86400) if not x.get("error")]
+        radios: dict[str, list] = {}
+        for r in db.latest_radio():
+            radios.setdefault(r["unit"], []).append({"band": r.get("band"), "tx_fail_pct": r.get("tx_fail_pct"),
+                                                     "temperature": r.get("temperature")})
+        units = db.units()
+        router = next((u["mac"] for u in units if u.get("role") == "router"), None)
+        wan = graphs.throughput(db.iface_counters_since(now - 600), {}, router)["wan"]
+        t["summary"] = {
+            "speed": speeds[-1] if speeds else None,
+            "latency": [{"label": x["label"], "kind": x["kind"], "avg_ms": x["avg_ms"],
+                         "loss_pct": round(100 * x["lost"] / x["sent"], 1) if x["sent"] else None}
+                        for x in self.monitor.live() if x["kind"] in ("router", "internet")],
+            "radios": radios,
+            "wan_now": {k: (v[-1][1] if v else None) for k, v in wan.items()},
+        }
+        return t
 
     # ------------------------------------------------------------ monitors and tests
 

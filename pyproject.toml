@@ -17,6 +17,7 @@ dependencies = [
   "pillow>=10",
   "devolo-plc-api>=1.4",
   "zeroconf>=0.130",
+  "qrcode>=7.4",
 ]
 
 [project.optional-dependencies]

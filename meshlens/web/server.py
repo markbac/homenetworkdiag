@@ -68,6 +68,12 @@ def build_app(engine: Engine, auth: Auth) -> web.Application:
     r.add_post("/api/discovery/run", discovery_run)
     r.add_get("/api/ports", ports_get)
     r.add_post("/api/update/check", update_check)
+    r.add_get("/api/connect", connect_info)
+    r.add_get("/api/connect/qr.svg", connect_qr)
+    r.add_get("/api/graphs", graphs_get)
+    r.add_get("/api/devices/{mac}/graphs", device_graphs)
+    r.add_get("/manifest.webmanifest", manifest)
+    r.add_get("/icon-{size:(180|192|512)}.png", icon)
     r.add_post("/api/update/install", update_install)
     return app
 
@@ -88,16 +94,18 @@ async def _security(request: web.Request, handler):
     resp.headers["X-Content-Type-Options"] = "nosniff"
     resp.headers["X-Frame-Options"] = "DENY"
     resp.headers["Referrer-Policy"] = "no-referrer"
-    resp.headers["Content-Security-Policy"] = "default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:"
+    resp.headers["Content-Security-Policy"] = "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
     if path.startswith("/api/"):
         resp.headers["Cache-Control"] = "no-store"
+    elif path == "/" or path.startswith("/static/"):
+        resp.headers["Cache-Control"] = "no-cache"   # revalidate, so a new version's pages load right after an update
     return resp
 
 
 def _login_response(request: web.Request, payload: dict[str, Any]) -> web.Response:
     token = request.app[AUTH].new_session()
     resp = web.json_response(payload)
-    resp.set_cookie(COOKIE, token, httponly=True, samesite="Strict", max_age=7 * 86400,
+    resp.set_cookie(COOKIE, token, httponly=True, samesite="Strict", max_age=30 * 86400,
                     secure=request.secure)
     return resp
 
@@ -331,6 +339,72 @@ async def discovery_run(request: web.Request) -> web.Response:
     return web.json_response({"ok": True})
 
 
+# ---------------------------------------------------------------- phones: addresses, QR, home-screen app
+
+def _connect_urls(request: web.Request) -> list[dict[str, Any]]:
+    from . import connect
+    engine = request.app[ENGINE]
+    adv = getattr(engine, "advertiser", None)
+    if engine.cfg.web.bind in ("127.0.0.1", "localhost"):
+        return []
+    return connect.urls(engine.cfg.web.port, engine.cfg.router.host, bool(adv and adv.ok))
+
+
+async def connect_info(request: web.Request) -> web.Response:
+    engine = request.app[ENGINE]
+    local_only = engine.cfg.web.bind in ("127.0.0.1", "localhost")
+    return web.json_response({"urls": await asyncio.to_thread(_connect_urls, request), "local_only": local_only})
+
+
+async def connect_qr(request: web.Request) -> web.Response:
+    from . import connect
+    urls = await asyncio.to_thread(_connect_urls, request)
+    try:
+        i = int(request.query.get("i", 0))
+        url = urls[i]["url"]
+    except (ValueError, IndexError):
+        return web.json_response({"error": "no such address"}, status=404)
+    return web.Response(body=connect.qr_svg(url), content_type="image/svg+xml")
+
+
+_ICONS: dict[int, bytes] = {}
+
+
+async def icon(request: web.Request) -> web.Response:
+    from . import connect
+    size = int(request.match_info["size"])
+    if size not in _ICONS:
+        _ICONS[size] = connect.icon_png(size)
+    return web.Response(body=_ICONS[size], content_type="image/png", headers={"Cache-Control": "max-age=86400"})
+
+
+async def manifest(request: web.Request) -> web.Response:
+    return web.json_response({
+        "name": "MeshLens", "short_name": "MeshLens", "start_url": "/", "display": "standalone",
+        "background_color": "#0e1218", "theme_color": "#2463eb",
+        "icons": [{"src": "/icon-192.png", "sizes": "192x192", "type": "image/png"},
+                  {"src": "/icon-512.png", "sizes": "512x512", "type": "image/png"}]},
+        content_type="application/manifest+json")
+
+
+async def graphs_get(request: web.Request) -> web.Response:
+    from .. import graphs
+    try:
+        hours = max(1.0, min(float(request.query.get("hours", 24)), 24 * 31))
+    except ValueError:
+        hours = 24.0
+    return web.json_response(await asyncio.to_thread(graphs.collect, hours))
+
+
+async def device_graphs(request: web.Request) -> web.Response:
+    from .. import graphs
+    try:
+        hours = max(1.0, min(float(request.query.get("hours", 24)), 24 * 31))
+    except ValueError:
+        hours = 24.0
+    return web.json_response(await asyncio.to_thread(graphs.device, request.match_info["mac"], hours))
+
+
 async def update_check(request: web.Request) -> web.Response:
     return web.json_response(await asyncio.to_thread(request.app[ENGINE].check_update))
 
@@ -499,6 +573,10 @@ def run_in_thread(engine: Engine, auth: Auth, host: str, port: int) -> tuple[asy
         runner = web.AppRunner(build_app(engine, auth), access_log=None)
         loop.run_until_complete(runner.setup())
         loop.run_until_complete(web.TCPSite(runner, host, port).start())
+        if host not in ("127.0.0.1", "localhost"):
+            from .connect import Advertiser
+            engine.advertiser = Advertiser()
+            engine.advertiser.start(port, engine.cfg.router.host)
         log.info("web UI on http://%s:%s", "localhost" if host in ("0.0.0.0", "127.0.0.1") else host, port)
         started.set()
         loop.run_forever()

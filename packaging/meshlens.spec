@@ -10,7 +10,7 @@ ROOT = os.path.abspath(os.path.join(SPECPATH, ".."))
 datas = [(os.path.join(ROOT, "meshlens", "web", "static"), os.path.join("meshlens", "web", "static"))]
 datas += collect_data_files("devolo_plc_api")
 hidden = (collect_submodules("zeroconf") + collect_submodules("devolo_plc_api") + collect_submodules("keyring.backends")
-          + ["pystray._win32", "win32timezone"])
+          + collect_submodules("qrcode") + ["pystray._win32", "win32timezone"])
 
 a = Analysis(
     [os.path.join(ROOT, "packaging", "launcher.py")],
