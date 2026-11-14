@@ -75,15 +75,30 @@ async function renderUnit(mac) {
       <p class="muted small">* Times the link went down/up since the unit started.</p>
       <p class="muted small">Amber speed = the link runs below what the port can do (cable, or the other end is slower).</p></div>
     <div class="card"><h3>Devices on this unit now (${d.clients.length})</h3>
-      ${tbl(["Device", "Band", "Signal", "Rate"], d.clients.map((c) => `<tr data-mac="${esc(c.mac)}" class="clickrow"><td>${esc(c.name)}</td>
-        <td>${esc(c.band ? c.band + " GHz" : "")}</td><td class="${rssiClass(c.rssi)}">${esc(c.rssi ?? "")}</td><td>${esc(c.tx_rate ?? "")}</td></tr>`), "clickable")}</div>
+      ${tbl(["Device", "Band", "Wi-Fi", "Signal", "Rate"], d.clients.map((c) => `<tr data-mac="${esc(c.mac)}" class="clickrow"><td>${esc(c.name)}</td>
+        <td>${esc(c.band ? c.band + " GHz" : "")}</td><td class="small">${esc(wifiLabel(c.wifi_gen, c.nss))}</td>
+        <td class="${rssiClass(c.rssi)}">${esc(c.rssi ?? "")}</td><td>${esc(c.tx_rate ?? "")}</td></tr>`), "clickable")}</div>
   </div>
+  ${d.dhcp || (d.conn_top && d.conn_top.length) ? `<div class="grid">
+    ${d.dhcp ? `<div class="card"><h3>Addresses (DHCP)</h3><div class="kv kv-wide">
+      <div>Pool</div><div>${esc(d.dhcp.start)} – ${esc(d.dhcp.end)} (${esc(d.dhcp.size)} addresses)</div>
+      <div>In use</div><div class="${pctClass(d.dhcp.pct, 75, 90)}">${esc(d.dhcp.leases)} (${esc(d.dhcp.pct)}%)</div></div>
+      <p class="muted small">When the pool fills, new devices can't join. Phones using private addresses can take more than one.</p></div>` : ""}
+    ${d.conn_top && d.conn_top.length ? `<div class="card"><h3>Most connections <span class="muted small">${esc(d.conn_total)} tracked in total</span></h3>
+      ${tbl(["Device", "Address", "Connections"], d.conn_top.slice(0, 10).map((c) => `<tr ${c.mac ? `data-mac="${esc(c.mac)}" class="clickrow"` : ""}><td>${esc(c.name)}</td>
+        <td class="mono small">${esc(c.ip)}</td><td>${esc(c.count)}</td></tr>`))}</div>` : ""}
+  </div>` : ""}
 
   ${d.settings ? settingsHtml(d.settings) : `<div class="card"><h3>Settings</h3><p class="muted">${u.role === "router" ? "Read at the next full poll (every 15 minutes)." : "Read at the next full poll."}</p></div>`}
 
   <div class="card"><details><summary><b>Raw identity values</b> <span class="muted small">(as reported by the unit)</span></summary>
     <div class="table-scroll short"><table>${Object.entries(id).map(([k, v]) => `<tr><td class="mono">${esc(k)}</td><td class="mono wrap">${esc(v)}</td></tr>`).join("")}</table></div></details></div>`;
   drawSystemCharts(d);
+}
+
+function wifiLabel(gen, nss) {
+  if (!gen) return "";
+  return gen + (nss ? ` · ${nss}×${nss}` : "");
 }
 
 function systemHtml(d) {

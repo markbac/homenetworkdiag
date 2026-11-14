@@ -86,7 +86,9 @@ class Engine:
             if hit and now - hit[0] < 30:
                 return hit[1]
         since = now - hours * 3600
-        net = {"unit_events": db.events(since, kinds=["radar", "channel_change", "channel_replan", "unit_reboot", "link_change", "wan_ip_change"], limit=5000),
+        net = {"unit_events": db.events(since, kinds=["radar", "channel_change", "channel_replan", "unit_reboot", "link_change",
+                                                     "wan_ip_change", "router_warning"], limit=5000),
+               "devices": db.devices(),
                "iface_counters": db.iface_counters_since(since), "units": db.units(),
                "unit_samples": db.unit_samples_since(since), "settings": db.latest_settings(), "host_lan": db.host_lan_since(since), "air": db.air_scan_since(max(since, now - 6 * 3600)),
                "analysis_cfg": self.cfg.analysis, "pings": db.ping_minutes(since), "speeds": db.speed_tests(now - 7 * 86400),

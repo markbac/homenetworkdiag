@@ -189,6 +189,29 @@ def parse_df(text: str) -> dict[str, Any]:
     return {k: v for k, v in out.items() if k in ("jffs_pct", "tmp_pct")}
 
 
+def parse_conn_counts(text: str) -> list[dict[str, Any]]:
+    """``<count> <ip>`` lines (connections per local address, counted on the router) -> busiest first."""
+    out = []
+    for line in text.splitlines():
+        p = line.split()
+        if len(p) == 2 and p[0].isdigit() and re.fullmatch(r"\d+\.\d+\.\d+\.\d+", p[1]):
+            out.append({"ip": p[1], "count": int(p[0])})
+    return sorted(out, key=lambda x: -x["count"])
+
+
+def dhcp_pool(settings: dict[str, str], leases: int) -> dict[str, Any] | None:
+    """Pool size from the router's DHCP range and how much of it is leased."""
+    import ipaddress
+    try:
+        a, b = ipaddress.ip_address(settings["dhcp_start"]), ipaddress.ip_address(settings["dhcp_end"])
+    except (KeyError, ValueError):
+        return None
+    size = int(b) - int(a) + 1
+    if size <= 0:
+        return None
+    return {"start": str(a), "end": str(b), "size": size, "leases": leases, "pct": round(100 * leases / size, 1)}
+
+
 def parse_links(text: str) -> dict[str, dict[str, Any]]:
     """``<iface> <carrier_changes> <operstate> <speed>`` per line."""
     out = {}
@@ -336,6 +359,32 @@ def parse_leases(text: str) -> list[dict[str, Any]]:
 
 # ---------------------------------------------------------------- per-client radio stats
 
+_GEN = {"eht": "Wi-Fi 7", "he": "Wi-Fi 6", "vht": "Wi-Fi 5", "ht": "Wi-Fi 4"}
+
+
+def rate_capability(info: str) -> dict[str, Any]:
+    """MediaTek ``tx_rate_info``: '2340 vhtmcs 3 vhtnss 2' / 'hemcs 9 henss 2' / 'mcs 7' -> standard, streams, MCS.
+    It describes the rate in use, so a plain legacy number (e.g. '6') says nothing about the device."""
+    m = re.search(r"\b(eht|he|vht)mcs (\d+) \1nss (\d+)", info)
+    if m:
+        return {"wifi_gen": _GEN[m.group(1)], "nss": int(m.group(3)), "mcs": int(m.group(2))}
+    m = re.search(r"\bmcs (\d+)", info)
+    if m:
+        mcs = int(m.group(1))
+        return {"wifi_gen": "Wi-Fi 4", "nss": mcs // 8 + 1, "mcs": mcs % 8}
+    w = re.search(r"\b(\d+)MHz", info)
+    return {"width": int(w.group(1))} if w else {}
+
+
+def mode_capability(mode: str) -> dict[str, Any]:
+    """Qualcomm MODE column, e.g. IEEE80211_MODE_11AXA_HE80 -> Wi-Fi 6, 80 MHz."""
+    m = mode.replace("IEEE80211_MODE_", "")
+    gen = ("Wi-Fi 7" if m.startswith("11BE") else "Wi-Fi 6" if m.startswith("11AX") else "Wi-Fi 5" if m.startswith("11AC")
+           else "Wi-Fi 4" if m.startswith(("11NG", "11NA")) else "legacy" if m.startswith(("11A", "11B", "11G")) else None)
+    w = re.search(r"(\d+)$", m)
+    return {"wifi_gen": gen, "width": int(w.group(1)) if w else None}
+
+
 def parse_hostapd_all_sta(text: str, iface: str) -> list[dict[str, Any]]:
     """``hostapd_cli -i <if> all_sta``: blocks starting with a MAC line."""
     out: list[dict[str, Any]] = []
@@ -355,6 +404,7 @@ def parse_hostapd_all_sta(text: str, iface: str) -> list[dict[str, Any]]:
                 parts = v.split()
                 cur[k.replace("_info", "")] = float(parts[0]) / 10 if parts and parts[0].isdigit() else None
                 cur[k] = v
+                cur.update({kk: vv for kk, vv in rate_capability(v).items() if vv is not None and kk not in cur})
             elif k == "flags":
                 cur["flags"] = v
     return out
@@ -372,7 +422,14 @@ def parse_wlanconfig_list_sta(text: str, iface: str) -> list[dict[str, Any]]:
             return float(m.group(1)) if m else None
         def num(x: str) -> int | None:
             return int(x) if x.lstrip("-").isdigit() else None
-        out.append({"mac": norm_mac(f[0]), "iface": iface, "band": band_of_iface(iface),
+        mode_i = next((i for i, x in enumerate(f) if x.startswith("IEEE80211_MODE_")), None)
+        cap: dict[str, Any] = {}
+        if mode_i is not None:
+            cap = mode_capability(f[mode_i])
+            nss = [num(x) for x in f[mode_i + 1:mode_i + 3]]
+            if nss and all(n is not None for n in nss):
+                cap["nss"] = max(nss)
+        out.append({"mac": norm_mac(f[0]), "iface": iface, "band": band_of_iface(iface), **cap,
                     "channel": num(f[2]), "tx_rate": rate(f[3]), "rx_rate": rate(f[4]),
                     "rssi": num(f[5]), "rssi_min": num(f[6]), "rssi_max": num(f[7]), "idle_s": num(f[8]),
                     "assoc_time": next((x for x in f if re.fullmatch(r"\d{2}:\d{2}:\d{2}", x)), None)})
@@ -473,6 +530,9 @@ _EVENT_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("channel_replan", re.compile(r"trigger acs word\((?P<iface>\w+)\) channel\((?P<channel>\d+)\) bw\((?P<bw>\d+)\)"
                                   r"(?: unavbl_ch\((?P<unavailable>[\d,]+)\))?")),
     ("unit_reboot", re.compile(r"current \[reboot\] parent \[[\w.-]+\],\[(?P<by>[\w.-]+)\]")),
+    # Serious router messages (curated: things that hurt the network, not routine noise).
+    ("router_warning", re.compile(r"(?P<what>no address range available|DHCPNAK|nf_conntrack: table full|possible SYN flooding|"
+                                  r"Out of memory|oom-killer|segfault|Kernel panic|Unable to handle kernel|hung_task|BUG: )")),
 ]
 
 
@@ -508,7 +568,7 @@ def parse_log_events(text: str, unit: str, now: datetime | None = None) -> list[
             for k in ("target_rssi", "rssi", "status", "channel", "to_channel", "bw"):
                 if k in g:
                     detail[k] = int(g.pop(k))
-            for k in ("unavailable", "by"):
+            for k in ("unavailable", "by", "what"):
                 if k in g:
                     detail[k] = g.pop(k)
             iface = g.pop("iface", None)

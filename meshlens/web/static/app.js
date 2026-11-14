@@ -11,7 +11,7 @@ const bandLabel = (b) => b ? `${b} GHz` : "wired";
 const KIND = { connect: "Connected", disconnect: "Disconnected", kick: "Kicked (weak signal)", roam_candidate: "Roam attempt",
   roam: "Roam result", moved_away: "Moved to another unit", leave: "Left (signal)", assoc_failed: "Association failed",
   radar: "Radar detected (DFS)", channel_change: "Channel changed", channel_replan: "Channel re-planned", unit_reboot: "Unit restarted",
-  link_change: "Wired link down/up", wan_ip_change: "Internet reconnected" };
+  link_change: "Wired link down/up", wan_ip_change: "Internet reconnected", router_warning: "Router warning" };
 const SEV = { high: "High", medium: "Medium", low: "Low", info: "Info" };
 
 let unitsByMac = {}, devicesByMac = {};
@@ -195,7 +195,7 @@ function drawTrend(canvas, days) {
 // ---------------------------------------------------------------- devices
 let devSort = { key: "health", dir: 1 };
 const DEV_COLS = [["name", "Name"], ["health", "Health"], ["type", "Type"], ["ip", "IP"], ["vendor", "Vendor"], ["conn", "Connection"],
-  ["rssi", "Signal"], ["rate", "Rate tx/rx"], ["auth", "Security"], ["seen", "Last seen"]];
+  ["rssi", "Signal"], ["rate", "Rate tx/rx"], ["wifi", "Wi-Fi"], ["auth", "Security"], ["seen", "Last seen"]];
 
 function fillSelect(sel, values, keepFirst = true) {
   const el = $(sel), cur = el.value, first = keepFirst ? el.options[0].outerHTML : "";
@@ -218,7 +218,7 @@ async function loadDevices() {
     && (!q || [d.user_name, d.name, d.ip, d.mac, d.vendor, d.owner, d.room, d.model].join(" ").toLowerCase().includes(q)));
   const key = (d) => { const l = d.live || {};
     return { name: displayName(d, d.mac).toLowerCase(), health: d.health ?? 101, type: d.user_type || d.dtype || "~", ip: (d.ip || "~").split(".").map((x) => x.padStart(3, "0")).join("."),
-      vendor: (d.vendor || "~").toLowerCase(), conn: bandOf(d) + unitName(unitOf(d)), rssi: l.rssi ?? 0, rate: l.tx_rate ?? -1, auth: d.wifi_auth || "~", seen: -(d.last_seen || 0) }[devSort.key]; };
+      vendor: (d.vendor || "~").toLowerCase(), conn: bandOf(d) + unitName(unitOf(d)), rssi: l.rssi ?? 0, rate: l.tx_rate ?? -1, wifi: d.wifi_gen || "~", auth: d.wifi_auth || "~", seen: -(d.last_seen || 0) }[devSort.key]; };
   rows.sort((a, b) => { const x = key(a), y = key(b); return (x < y ? -1 : x > y ? 1 : 0) * devSort.dir; });
   $("#dev-count").textContent = `${rows.length} of ${devs.length}`;
   $("#devices-table").innerHTML = `<thead><tr>${DEV_COLS.map(([k, l]) => `<th data-sort="${k}" class="${devSort.key === k ? (devSort.dir > 0 ? "asc" : "desc") : ""}">${l}</th>`).join("")}</tr></thead><tbody>` +
@@ -229,6 +229,7 @@ async function loadDevices() {
       <td class="muted">${esc(d.user_type || d.dtype || "")}</td><td>${esc(d.ip)}</td><td class="small">${esc(d.vendor)}</td>
       <td>${d.wired ? "wired" : (l.band || d.band) ? `<span class="pill b${esc(String(l.band || d.band).replace(".", ""))}">${esc(bandLabel(l.band || d.band))}</span> ${esc(unitName(l.unit || d.unit))}` : '<span class="muted">LAN</span>'}</td>
       <td class="${rssiClass(l.rssi)}">${l.rssi ?? ""}</td><td>${l.tx_rate != null ? esc(`${l.tx_rate}/${l.rx_rate ?? "?"}`) : ""}</td>
+      <td class="small">${esc(d.wifi_gen ? d.wifi_gen + (d.wifi_nss ? ` ${d.wifi_nss}×${d.wifi_nss}` : "") : "")}</td>
       <td class="small">${esc(d.wifi_auth)}</td><td class="muted small">${esc(ago(d.last_seen))}</td></tr>`; }).join("") + "</tbody>";
 }
 
@@ -249,6 +250,7 @@ async function openDevice(mac) {
       <div>Typical signal</div><div class="${rssiClass(h.typical_rssi)}">${h.typical_rssi != null ? Math.round(h.typical_rssi) + " dBm" : "n/a"}</div>
       <div>Rate tx / rx</div><div>${last.tx_rate != null ? esc(`${last.tx_rate} / ${last.rx_rate} Mbit/s`) : "n/a"}</div>
       <div>Wi-Fi security</div><div>${esc(d.wifi_auth)}</div>
+      <div>Wi-Fi standard</div><div>${d.wifi_gen ? esc(d.wifi_gen) + (d.wifi_nss ? ` · ${esc(d.wifi_nss)} stream${d.wifi_nss > 1 ? "s" : ""}` : "") + (d.wifi_width ? ` · ${esc(d.wifi_width)} MHz` : "") : '<span class="muted">not seen yet</span>'}</div>
       <div>Last 24 h</div><div>${s.mac ? esc(`${s.kicks} kicks, ${s.roam_attempts} roam attempts, ${s.disconnects} disconnects`) : "no Wi-Fi events"}</div>
     </div>
     ${typeof deviceExtras === "function" ? deviceExtras(d) : ""}
@@ -311,7 +313,7 @@ function drawDaily(canvas, rows) {
 // ---------------------------------------------------------------- events
 const EV_CLASS = { kick: "kick", disconnect: "disconnect", leave: "disconnect", connect: "connect", roam_candidate: "roam", roam: "roam",
   moved_away: "roam", assoc_failed: "assoc_failed", radar: "unit", channel_change: "unit", channel_replan: "unit", unit_reboot: "unit",
-  link_change: "unit", wan_ip_change: "unit" };
+  link_change: "unit", wan_ip_change: "unit", router_warning: "kick" };
 
 async function loadEvents() {
   const { devs, units } = await refreshBase();
@@ -343,6 +345,7 @@ function unitDetail(e) {
   if (e.kind === "unit_reboot") return d.by ? `requested by ${esc(d.by)}` : "";
   if (e.kind === "link_change") return `${esc(e.iface)}: ${esc(d.changes)} change${d.changes > 1 ? "s" : ""}, now ${esc(d.state || "?")}${d.speed ? ` ${esc(d.speed)} Mbit/s` : ""}`;
   if (e.kind === "wan_ip_change") return "new internet address";
+  if (e.kind === "router_warning") return esc(d.what || "");
   return "";
 }
 

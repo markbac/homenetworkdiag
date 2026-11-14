@@ -52,7 +52,8 @@ def test_wlanconfig_list_sta(fixture_text):
     s = P.split_sections(fixture_text("asus/node_qualcomm.txt"))
     sta = P.parse_wlanconfig_list_sta(s["sta_wlanconfig:ath001"], "ath001")
     assert sta == [{"mac": "02:aa:00:00:00:05", "iface": "ath001", "band": "2.4", "channel": 11, "tx_rate": 72.0,
-                    "rx_rate": 58.0, "rssi": -50, "rssi_min": -58, "rssi_max": -44, "idle_s": 17, "assoc_time": "08:11:46"}]
+                    "rx_rate": 58.0, "rssi": -50, "rssi_min": -58, "rssi_max": -44, "idle_s": 17, "assoc_time": "08:11:46",
+                    "wifi_gen": "Wi-Fi 6", "width": 20}]
 
 
 def test_mwctl_stat(fixture_text):

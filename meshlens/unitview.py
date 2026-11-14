@@ -92,10 +92,15 @@ def detail(mac: str) -> dict[str, Any] | None:
         "wired": wired_counters(mac),
         "settings": settings_info.describe(settings) if settings else None,
         "clients": sorted([{"mac": s["mac"], "name": display_name(devs.get(s["mac"]), s["mac"]), "iface": s.get("iface"),
+                            "wifi_gen": (devs.get(s["mac"]) or {}).get("wifi_gen"), "nss": (devs.get(s["mac"]) or {}).get("wifi_nss"),
                             "band": s.get("band"), "rssi": s.get("rssi"), "tx_rate": s.get("tx_rate")} for s in clients],
                           key=lambda c: (c["band"] or "", -(c["rssi"] or -999))),
         "counters": [{"iface": k, **v} for k, v in sorted(rates.items())],
         "system": info.get("system") or {},
+        "dhcp": info.get("dhcp"),
+        "conn_top": [{**c, "name": display_name(devs.get(c.get("mac")), c.get("mac") or c["ip"]) if c.get("mac") else c["ip"]}
+                     for c in info.get("conn_top") or []],
+        "conn_total": info.get("conn_total"),
         "system_history": {k: [[h["ts"], h[k]] for h in hist if h.get(k) is not None]
                            for k in ("cpu_pct", "max_core_pct", "mem_used_pct", "temp_c", "load1", "conntrack")},
     }

@@ -27,7 +27,9 @@ TOOLS = ["wl", "iw", "iwpriv", "iwconfig", "mwctl", "hostapd_cli", "wlanconfig",
 
 LOG_PATTERN = ("hapdevent|roamast|ieee80211_node_leave|assoc failed with status"
                # radar (DFS) detections, forced channel changes, channel re-planning, deliberate restarts
-               "|Radar found|Changing to DFS|trigger acs|current \\[reboot\\]")
+               "|Radar found|Changing to DFS|trigger acs|current \\[reboot\\]"
+               "|no address range available|DHCPNAK|nf_conntrack: table full|possible SYN flooding|Out of memory"
+               "|oom-killer|segfault|Kernel panic|Unable to handle kernel|hung_task|BUG: ")
 
 
 def _nvram_block(key: str, keys: list[str]) -> str:
@@ -77,7 +79,10 @@ def unit_script(main: bool, first_poll: bool, full: bool) -> str:
         if full:
             lines += [
                 'echo "@@@ nmp_clients"; cat /jffs/nmp_cl_json.js 2>/dev/null; echo',
-                'echo "@@@ leases"; cat /var/lib/misc/dnsmasq.leases 2>/dev/null',
+                'echo "@@@ leases"; cat /var/lib/misc/dnsmasq.leases 2>/dev/null; echo',
+                # Connections per local address, counted on the router (only counts leave the router).
+                "echo \"@@@ conn_counts\"; awk '{ if (match($0, /src=[0-9.]+/)) c[substr($0, RSTART+4, RLENGTH-4)]++ } "
+                "END { for (k in c) print c[k], k }' /proc/net/nf_conntrack 2>/dev/null",
                 'for f in /tmp/[0-9A-F][0-9A-F]:*.json; do [ -f "$f" ] && { echo "@@@ node:$(basename $f .json)"; cat "$f"; echo; }; done',
                 'echo "@@@ port_status"; cat /tmp/diag_port_status.json 2>/dev/null; echo',
                 # Results of speed tests already run on the router (ASUS app / web UI). Read-only.
