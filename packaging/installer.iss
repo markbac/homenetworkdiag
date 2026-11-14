@@ -24,7 +24,9 @@ WizardStyle=modern
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=admin
-CloseApplications=force
+; MeshLens is stopped by PrepareToInstall below; Windows' Restart Manager closing the tray window
+; made older versions show a crash dialog during updates.
+CloseApplications=no
 RestartApplications=no
 
 [Tasks]
@@ -61,3 +63,14 @@ FinishedLabel=MeshLens is installed. It runs in the system tray; open http://loc
 
 ; Your data (settings, history, logs) stays in %LOCALAPPDATA%\MeshLens and is kept on uninstall.
 ; Passwords stay in the Windows Credential Manager under "MeshLens".
+
+[Code]
+// Stop a running MeshLens (any version) before files are replaced. Its data and settings are untouched.
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  ResultCode: Integer;
+begin
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/IM MeshLens.exe /F /T', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Sleep(1500);
+  Result := '';
+end;
