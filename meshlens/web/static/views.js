@@ -126,29 +126,33 @@ async function loadMonitorHistory() {
 }
 
 async function loadSpeed() {
-  const tests = await api("/api/speedtests?days=30");
-  const ok = tests.filter((t) => !t.error), last = tests[tests.length - 1];
-  $("#speed-last").innerHTML = last ? `<div class="speed-cards">
-      <div><div class="big">${esc(last.down_mbps ?? "–")}</div><div class="muted small">Mbit/s down</div></div>
-      <div><div class="big">${esc(last.up_mbps ?? "–")}</div><div class="muted small">Mbit/s up</div></div>
-      <div><div class="big">${esc(last.idle_ms ?? "–")}</div><div class="muted small">ms idle</div></div>
-      <div><div class="big">${esc(last.down_loaded_ms ?? "–")} / ${esc(last.up_loaded_ms ?? "–")}</div><div class="muted small">ms while downloading / uploading</div></div>
-      <div><div class="big grade g-${esc((last.grade || "").replace("+", "p"))}">${esc(last.grade || "–")}</div><div class="muted small">bufferbloat</div></div>
-    </div><p class="muted small">${esc(fmtTime(last.ts))} · ${esc(last.trigger)} · ${esc(last.server)}${last.error ? ` · <span class="bad">${esc(last.error)}</span>` : ""}</p>`
-    : '<p class="muted">No speed tests yet. Scheduled tests run every few hours (Settings → Monitors and speed tests).</p>';
-  const c = $("#speed-chart"), ctx = c.getContext("2d"), w = (c.width = c.clientWidth * 2), h = (c.height = 300), css = getComputedStyle(document.body), col = (v) => css.getPropertyValue(v).trim();
-  ctx.clearRect(0, 0, w, h); ctx.font = "22px system-ui";
-  if (ok.length >= 2) {
-    const pad = 50, max = Math.max(1, ...ok.flatMap((t) => [t.down_mbps || 0, t.up_mbps || 0])), t0 = ok[0].ts, t1 = ok[ok.length - 1].ts;
-    const x = (t) => pad + ((t - t0) / Math.max(1, t1 - t0)) * (w - 2 * pad), y = (v) => h - pad - (v / max) * (h - 2 * pad);
-    ctx.fillStyle = col("--muted"); [0, 0.5, 1].forEach((f) => ctx.fillText(`${Math.round(max * f)}`, 0, y(max * f)));
-    for (const [k, cc] of [["down_mbps", "--accent"], ["up_mbps", "--good"]]) { ctx.strokeStyle = col(cc); ctx.lineWidth = 3; ctx.beginPath();
-      ok.forEach((t, i) => (i ? ctx.lineTo(x(t.ts), y(t[k] || 0)) : ctx.moveTo(x(t.ts), y(t[k] || 0)))); ctx.stroke(); }
-  } else { ctx.fillStyle = col("--muted"); ctx.fillText("The chart appears after two speed tests.", 20, h / 2); }
-  $("#speed-table").innerHTML = "<tr><th>When</th><th>Down</th><th>Up</th><th>Idle</th><th>Loaded (down / up)</th><th>Bufferbloat</th><th></th></tr>" +
-    tests.slice(-20).reverse().map((t) => `<tr><td class="muted">${esc(fmtTime(t.ts))}</td><td>${esc(t.down_mbps ?? "")}</td><td>${esc(t.up_mbps ?? "")}</td>
-      <td>${esc(t.idle_ms ?? "")}</td><td>${esc(t.down_loaded_ms ?? "")} / ${esc(t.up_loaded_ms ?? "")}</td><td>${esc(t.grade || "")}</td>
-      <td class="small ${t.error ? "bad" : "muted"}">${esc(t.error || t.trigger)}</td></tr>`).join("");
+  const [tests, st] = await Promise.all([api("/api/speedtests?days=30"), api("/api/status")]);
+  const where = (t) => t.location === "router" ? "router" : "pc";
+  const label = { router: "On the router (the internet line)", pc: "From this PC (line + its path)" };
+  const card = (w) => { const t = tests.filter((x) => where(x) === w && !x.error).slice(-1)[0];
+    if (!t) return `<div class="card"><h4>${label[w]}</h4><p class="muted">${w === "router" ? (st.speedtest.router_enabled ? "No router test yet."
+      : "Router tests are off. Turn them on under Settings → Monitors and speed tests (this accepts Ookla's terms). Results of tests you run in the ASUS app appear here anyway.")
+      : "No test from this PC yet."}</p></div>`;
+    return `<div class="card"><h4>${label[w]}</h4><div class="speed-cards">
+      <div><div class="big">${esc(t.down_mbps ?? "–")}</div><div class="muted small">Mbit/s down</div></div>
+      <div><div class="big">${esc(t.up_mbps ?? "–")}</div><div class="muted small">Mbit/s up</div></div>
+      <div><div class="big">${esc(t.idle_ms ?? "–")}</div><div class="muted small">ms idle</div></div>
+      <div><div class="big">${esc(t.down_loaded_ms ?? "–")} / ${esc(t.up_loaded_ms ?? "–")}</div><div class="muted small">ms loaded (down / up)</div></div>
+      <div><div class="big grade g-${esc((t.grade || "").replace("+", "p"))}">${esc(t.grade || "–")}</div><div class="muted small">bufferbloat</div></div></div>
+      <p class="muted small">${esc(fmtTime(t.ts))} · ${esc(t.trigger)} · ${esc(t.server)}</p></div>`; };
+  $("#speed-last").innerHTML = card("router") + card("pc");
+  $("#speed-run-router").disabled = !st.speedtest.router_enabled || st.speedtest.router_running;
+  $("#speed-run-router").title = st.speedtest.router_enabled ? "" : "Turn on in Settings → Monitors and speed tests";
+  const ok = tests.filter((t) => !t.error && t.down_mbps != null);
+  const ser = {};
+  for (const t of ok) { const w = where(t) === "router" ? "router" : "PC";
+    (ser[`Download (${w})`] ||= []).push([t.ts, t.down_mbps]); (ser[`Upload (${w})`] ||= []).push([t.ts, t.up_mbps]); }
+  Charts.time($("#speed-chart"), { series: ser, type: "line", unit: "Mbit/s", empty: "The chart appears after the first speed tests." });
+  $("#speed-table").innerHTML = "<thead><tr><th>When</th><th>Where</th><th>Down</th><th>Up</th><th>Idle</th><th>Loaded (down / up)</th><th>Bufferbloat</th><th>Server / note</th></tr></thead><tbody>" +
+    tests.slice(-40).reverse().map((t) => `<tr><td class="muted small">${esc(fmtTime(t.ts))}</td><td><span class="pill">${where(t) === "router" ? "router" : "this PC"}</span></td>
+      <td>${esc(t.down_mbps ?? "")}</td><td>${esc(t.up_mbps ?? "")}</td><td>${esc(t.idle_ms ?? "")}</td><td>${esc(t.down_loaded_ms ?? "–")} / ${esc(t.up_loaded_ms ?? "–")}</td>
+      <td class="grade g-${esc((t.grade || "").replace("+", "p"))}">${esc(t.grade || "")}</td>
+      <td class="small ${t.error ? "bad" : "muted"} wrap">${esc(t.error || `${t.trigger} · ${t.server || ""}`)}</td></tr>`).join("") + "</tbody>";
 }
 
 // ---------------------------------------------------------------- device drawer extras (ports, services, names)
@@ -175,12 +179,14 @@ document.addEventListener("DOMContentLoaded", () => {
   ["#topo-devices", "#topo-weak"].forEach((s) => $(s).addEventListener("change", loadTopology));
   $("#mon-hours").addEventListener("change", loadMonitorHistory);
   $("#mon-target").addEventListener("change", loadMonitorHistory);
-  $("#speed-run").onclick = async () => {
-    $("#speed-run").disabled = true; $("#speed-msg").textContent = "Running (about 30 s): idle latency, then download, then upload…";
-    try { const r = await post("/api/speedtest"); $("#speed-msg").textContent = r.error ? r.error : `Done: ${r.down_mbps} / ${r.up_mbps} Mbit/s, bufferbloat ${r.grade}`; }
+  const runSpeed = (where, btn, msg) => async () => {
+    btn.disabled = true; $("#speed-msg").textContent = msg;
+    try { const r = await post("/api/speedtest", { where }); $("#speed-msg").textContent = r.error ? r.error : `Done: ${r.down_mbps} / ${r.up_mbps} Mbit/s, bufferbloat ${r.grade || "?"}`; }
     catch (e) { $("#speed-msg").textContent = e.message; }
-    $("#speed-run").disabled = false; loadSpeed();
+    btn.disabled = false; loadSpeed();
   };
+  $("#speed-run").onclick = runSpeed("pc", $("#speed-run"), "Testing from this PC (about 30 s): idle latency, download, upload…");
+  $("#speed-run-router").onclick = runSpeed("router", $("#speed-run-router"), "Testing on the router (about 40 s)…");
   for (const [id, what, msg] of [["#scan-sweep", "sweep", "Finding devices (about 10 s)…"], ["#scan-services", "services", "Listening for names and services (about 20 s)…"],
     ["#scan-ports", "ports", "Scanning ports on every device seen today (a few minutes)…"]])
     $(id).onclick = async () => { await post("/api/discovery/run", { what }); $("#scan-msg").textContent = msg + " Refresh to see results."; };

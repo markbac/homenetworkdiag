@@ -46,7 +46,8 @@ CREATE TABLE IF NOT EXISTS units (
   macs TEXT,                      -- JSON list: every radio/BSSID/backhaul address of the unit
   reachable INTEGER, last_seen REAL, last_error TEXT,
   parent_hint TEXT,               -- preferred parent BSSID from the node's own settings
-  backhaul TEXT                   -- JSON [{parent, band, rssi, ts}]: this node's backhaul radios seen as clients
+  backhaul TEXT,                  -- JSON [{parent, band, rssi, ts}]: this node's backhaul radios seen as clients
+  info TEXT                       -- JSON snapshot: identity, uptime, load, interfaces, ports (Router tab)
 );
 
 CREATE TABLE IF NOT EXISTS station_samples (
@@ -111,8 +112,21 @@ CREATE INDEX IF NOT EXISTS ping_target_ts ON ping_minutes(target, ts);
 
 CREATE TABLE IF NOT EXISTS speed_tests (
   ts REAL, server TEXT, down_mbps REAL, up_mbps REAL,
-  idle_ms REAL, down_loaded_ms REAL, up_loaded_ms REAL, grade TEXT, trigger TEXT, error TEXT
+  idle_ms REAL, down_loaded_ms REAL, up_loaded_ms REAL, grade TEXT, trigger TEXT, error TEXT,
+  location TEXT                   -- where the test ran: pc (this PC), router, probe:<id>; empty = pc
 );
+
+CREATE TABLE IF NOT EXISTS host_lan (
+  ts REAL, adapter TEXT, rx_mbps REAL, tx_mbps REAL, ucast_pps REAL, mcast_pps REAL, bcast_pps REAL,
+  discards INTEGER, errors INTEGER
+);
+CREATE INDEX IF NOT EXISTS host_lan_ts ON host_lan(ts);
+
+CREATE TABLE IF NOT EXISTS air_scan (
+  ts REAL, bssid TEXT, ssid TEXT, band TEXT, channel INTEGER, signal_pct INTEGER, rssi INTEGER,
+  util_pct INTEGER, stations INTEGER, radio TEXT, own_unit TEXT
+);
+CREATE INDEX IF NOT EXISTS air_scan_ts ON air_scan(ts);
 
 CREATE TABLE IF NOT EXISTS daily_device_summary (
   day TEXT, mac TEXT, kicks INTEGER, roams INTEGER, connects INTEGER, disconnects INTEGER,
@@ -260,7 +274,7 @@ def prune(raw_days: int, summary_days: int, now: float | None = None) -> None:
     with _write_lock:
         c = conn()
         for t in ("station_samples", "radio_samples", "iface_counters", "events", "unit_settings", "inventory_events",
-                  "plc_rates", "ping_minutes"):
+                  "plc_rates", "ping_minutes", "host_lan", "air_scan"):
             c.execute(f"DELETE FROM {t} WHERE ts < ?", (cut,))
         day_cut = time.strftime("%Y-%m-%d", time.localtime(now - summary_days * 86400))
         c.execute("DELETE FROM daily_device_summary WHERE day < ?", (day_cut,))
@@ -284,6 +298,7 @@ def units() -> list[dict[str, Any]]:
     for u in out:
         u["macs"] = json.loads(u["macs"] or "[]")
         u["backhaul"] = json.loads(u.get("backhaul") or "[]")
+        u["info"] = json.loads(u.get("info") or "{}")
     return out
 
 
@@ -530,3 +545,34 @@ def radio_samples_since(since: float) -> list[dict[str, Any]]:
     return _rows(conn().execute(
         "SELECT ts, unit, iface, band, tx_fail_pct, rx_crc_pct, temperature, noise FROM radio_samples WHERE ts >= ? ORDER BY ts",
         (since,)))
+
+
+def host_lan_since(since: float) -> list[dict[str, Any]]:
+    return _rows(conn().execute("SELECT * FROM host_lan WHERE ts >= ? ORDER BY ts", (since,)))
+
+
+def air_scan_since(since: float) -> list[dict[str, Any]]:
+    return _rows(conn().execute("SELECT * FROM air_scan WHERE ts >= ? ORDER BY ts", (since,)))
+
+
+def air_scan_latest() -> list[dict[str, Any]]:
+    return _rows(conn().execute(
+        "SELECT * FROM air_scan WHERE ts = (SELECT MAX(ts) FROM air_scan) ORDER BY band, channel, signal_pct DESC"))
+
+
+def add_speed_tests(rows: list[dict[str, Any]]) -> int:
+    """Insert results not already stored (same location and time to the second)."""
+    n = 0
+    with _write_lock:
+        c = conn()
+        for r in rows:
+            if c.execute("SELECT 1 FROM speed_tests WHERE COALESCE(location, 'pc') = ? AND ABS(ts - ?) < 1",
+                         (r.get("location") or "pc", r["ts"])).fetchone():
+                continue
+            keys = [k for k in ("ts", "server", "down_mbps", "up_mbps", "idle_ms", "down_loaded_ms", "up_loaded_ms",
+                                "grade", "trigger", "error", "location") if k in r]
+            c.execute(f"INSERT INTO speed_tests({', '.join(keys)}) VALUES ({', '.join('?' for _ in keys)})",
+                      [r[k] for k in keys])
+            n += 1
+        c.commit()
+    return n

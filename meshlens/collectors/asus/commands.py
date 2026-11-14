@@ -67,5 +67,7 @@ def unit_script(main: bool, first_poll: bool, full: bool) -> str:
                 'echo "@@@ leases"; cat /var/lib/misc/dnsmasq.leases 2>/dev/null',
                 'for f in /tmp/[0-9A-F][0-9A-F]:*.json; do [ -f "$f" ] && { echo "@@@ node:$(basename $f .json)"; cat "$f"; echo; }; done',
                 'echo "@@@ port_status"; cat /tmp/diag_port_status.json 2>/dev/null; echo',
+                # Results of speed tests already run on the router (ASUS app / web UI). Read-only.
+                'echo "@@@ ookla_history"; cat /jffs/.sys/OOKLA/ookla_history 2>/dev/null; echo',
             ]
     return "\n".join(lines) + "\n"

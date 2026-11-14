@@ -169,6 +169,46 @@
   so roams and kicks show as colour changes), link speed, data used, Wi-Fi events, ping latency (for watched devices) and its
   daily health score.</p>
 
+<h2 id="router-tab">Router tab</h2>
+<p>Everything MeshLens reads from each unit, in one place (read-only):</p>
+<ul>
+  <li><b>Identity and health:</b> model, firmware, address, how long it has been up (a short uptime means it restarted), CPU load,
+    and how it connects to the rest of the mesh (backhaul band and signal).</li>
+  <li><b>Radios and networks:</b> every Wi-Fi interface with its network name, band, channel, width, transmit power, devices,
+    traffic now, and the radio's failure and error rates and temperature. Hidden mesh backhaul networks are greyed.</li>
+  <li><b>How busy its channels are:</b> the access point's own measurement, heard by this PC (see below).</li>
+  <li><b>Ports:</b> each Ethernet port, whether something is plugged in and at what speed. Amber means slower than the port can
+    do, for example a 2.5G port linked at 1G because the other end or the cable is 1G.</li>
+  <li><b>Devices on the unit now</b> (click one for details), <b>radio and network settings</b> explained in plain English, and
+    every raw value MeshLens reads. Change settings in the ASUS app or web UI; MeshLens never does.</li>
+</ul>
+
+<h2 id="hostpc">This PC as a network sensor</h2>
+<p>MeshLens uses the PC it runs on to measure what the routers don't report:</p>
+<dl>
+  <dt>Air survey</dt><dd>Every 2 minutes the PC's Wi-Fi card lists every access point it can hear (it does this even when not
+    connected). ASUS units, like most modern access points, include their own measurement of how much of the time their channel is
+    busy ("BSS Load", channel utilisation) and how many devices they have. Above about 50% devices queue to transmit; above 75% it
+    feels slow and laggy. Neighbours' networks on your channels are shown too.</dd>
+  <dt>Broadcast and multicast</dt><dd>Every minute MeshLens reads the wired adapter's counters. Every device must handle broadcast
+    and multicast traffic and on Wi-Fi it is sent at the slowest rate, so a flood (for example from a network scanner box) slows
+    everything. A quiet home network is under about 30 broadcast packets a second.</dd>
+  <dt>Wi-Fi link</dt><dd>When the PC's own Wi-Fi is connected: network, band, channel, signal and link speed.</dd>
+</dl>
+<p>It can only hear what reaches the PC: put it (or later an ESP32 probe) where you want to measure.</p>
+
+<h3 id="issue-lan_flood">Lots of broadcast and multicast traffic</h3>
+<p>The PC receives far more broadcast/multicast packets than a home network normally carries. Find the source by powering
+  devices off one at a time while watching Graphs → Broadcast and multicast; network scanners and looped cables are the usual causes.
+  Turning on IGMP snooping keeps multicast to the devices that want it.</p>
+<h3 id="issue-channel_busy">A channel is very busy</h3>
+<p>The access point itself reports its channel in use most of the time. On 2.4 GHz move everything that can use 5 GHz off it,
+  keep 20 MHz width and pick the quietest of channels 1, 6 and 11. Slow, distant devices use the most airtime.</p>
+<h3 id="issue-crowded_channel">Neighbours on your channel</h3><p>Several strong neighbouring networks share the channel and take turns with yours. A different channel may be quieter.</p>
+<h3 id="issue-pc_path_slow">The MeshLens PC gets much less than the line</h3>
+<p>The router's own speed test measures the internet line; the PC's test also includes its path to the router (Wi-Fi,
+  powerline, switches). When the PC gets far less, that path is the limit, and every device using the same path is limited too.</p>
+
 <h2 id="topology">Topology map</h2>
 <p>The <b>Diagram</b> view draws the network: the internet (with the last speed test, bufferbloat grade and latency), the
   router and each mesh unit (health score, devices per band, worst radio error rate), powerline adapters, and every device as a
@@ -207,6 +247,12 @@
   Routers answer those probes at low priority, so it is off by default and never used to raise issues on its own.</p>
 
 <h2 id="speedtest">Speed test and bufferbloat</h2>
+<p><b>Two places to test from.</b> <i>On the router</i> uses the speed test built into the ASUS firmware (Ookla), so it measures the
+  internet line itself with nothing in the way. It is off until you switch it on under Settings → Monitors and speed tests, because
+  running it accepts Ookla's licence and privacy terms. Results of tests you run in the ASUS app or web UI are read and shown
+  anyway. While it runs, MeshLens pings from the router to measure bufferbloat. <i>From this PC</i> measures the line plus the
+  PC's own path to the router. Compare the two: a big gap means the path, not the line, is slow. ESP32 probes will add tests from
+  wherever you place them.</p>
 <p>Three phases, about 25 seconds: idle latency, then download with 4 parallel streams while pinging, then upload while pinging.
   By default it uses Cloudflare's speed test servers: no account, and nothing about your network is sent, only the test traffic.
   Each test moves a few hundred MB. Scheduled tests run every 6 hours (change it, or turn it off, under Settings → Monitors

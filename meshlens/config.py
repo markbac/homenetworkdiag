@@ -128,11 +128,20 @@ class MonitorConfig:
     include_nodes: bool = True
     include_isp_hop: bool = False      # first ISP router (tracert-style); routers answer at low priority, so noisy
     include_watched: bool = True       # watched devices with an address
-    speedtest_hours: float = 6.0       # 0 = only on demand
+    speedtest_hours: float = 6.0       # 0 = only on demand (test from this PC)
+    router_speedtest: bool = False     # run Ookla on the router; switching it on accepts Ookla's licence and GDPR terms
+    router_speedtest_hours: float = 12.0
     speedtest_seconds: int = 10        # per direction
     speedtest_server: str = "https://speed.cloudflare.com"
     expected_down_mbps: float = 0.0    # your plan; 0 = unknown
     expected_up_mbps: float = 0.0
+
+
+@dataclass
+class HostConfig:
+    """The MeshLens PC as a sensor: air survey with its Wi-Fi card, broadcast/multicast on its wired adapter."""
+
+    enabled: bool = True
 
 
 @dataclass
@@ -180,6 +189,9 @@ class AnalysisConfig:
     mass_drop_devices: int = 4        # this many devices dropping off one unit within a minute
     crowded_clients_24: int = 20      # clients on one 2.4 GHz radio
     watched_offline_hours: float = 2.0
+    flood_pps: float = 100.0          # broadcast + multicast packets per second reaching the MeshLens PC
+    channel_busy_pct: float = 50.0    # an access point's own channel-utilisation report
+    crowded_neighbours: int = 3       # other networks heard on the same channel
 
 
 @dataclass
@@ -197,6 +209,7 @@ class Config:
     discovery: DiscoveryConfig = field(default_factory=DiscoveryConfig)
     monitor: MonitorConfig = field(default_factory=MonitorConfig)
     updates: UpdateConfig = field(default_factory=UpdateConfig)
+    hostpc: HostConfig = field(default_factory=HostConfig)
 
     @property
     def path(self) -> Path:

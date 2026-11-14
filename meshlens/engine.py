@@ -14,6 +14,7 @@ from . import analysis, oui, secrets, topology, updater
 from .collectors.asus.collector import AsusCollector
 from .collectors.devolo import DevoloCollector
 from .discovery import Discovery
+from .hostpc import HostMonitor
 from .monitor import PingMonitor
 from .net import icmp, speedtest
 from .store import db, jsonl
@@ -30,7 +31,8 @@ class Engine:
         self.devolo = DevoloCollector(cfg.devolo, self.root)
         self.discovery = Discovery(lambda: self.cfg, self.root)
         self.monitor = PingMonitor(cfg.monitor, self._ping_targets)
-        self.speed_status: dict[str, Any] = {"running": False, "last": None}
+        self.host = HostMonitor()
+        self.speed_status: dict[str, Any] = {"running": False, "last": None, "router_running": False}
         self.update_info: dict[str, Any] = {"available": False, "current": updater.__version__, "checked": None,
                                             "state": None, "error": None, "self_update": updater.can_self_update()}
         self.advertiser = None  # mDNS announcement (meshlens.local), started with the web server
@@ -84,7 +86,9 @@ class Engine:
             if hit and now - hit[0] < 30:
                 return hit[1]
         since = now - hours * 3600
-        net = {"pings": db.ping_minutes(since), "speeds": db.speed_tests(now - 7 * 86400),
+        net = {"host_lan": db.host_lan_since(since), "air": db.air_scan_since(max(since, now - 6 * 3600)),
+               "analysis_cfg": self.cfg.analysis, "pings": db.ping_minutes(since), "speeds": db.speed_tests(now - 7 * 86400),
+               "unit_names": {u["mac"]: u.get("alias") or u.get("model") or u["mac"] for u in db.units()},
                "plc_adapters": db.plc_adapters(), "plc_rates": db.plc_latest_rates(), "open_ports": db.open_ports(),
                "inventory": db.inventory_events(since), "monitor_cfg": self.cfg.monitor, "devolo_cfg": self.cfg.devolo}
         res = analysis.analyse(db.events(since, limit=200000), db.station_samples_since(since), db.latest_radio(),
@@ -149,6 +153,33 @@ class Engine:
                 uniq.append(t)
         return uniq
 
+    def run_router_speedtest(self, trigger: str = "manual") -> dict[str, Any]:
+        """Ookla on the main router (the internet line itself). Only when switched on in Settings."""
+        from .collectors.asus import speedtest as rst
+        from .collectors.asus.ssh import run_script
+        m, r = self.cfg.monitor, self.cfg.router
+        if not m.router_speedtest:
+            return {"error": "router speed tests are off (Settings → Monitors and speed tests)"}
+        if self.speed_status["router_running"]:
+            return {"error": "a router speed test is already running"}
+        self.speed_status["router_running"] = True
+        try:
+            from .collectors.asus import parsers as P
+            out = run_script(r.host, r.port, r.username, self.router_password(),
+                             rst.run_script(m.internet_targets[0] if m.internet_targets else "1.1.1.1"), timeout=45)
+            s = P.split_sections(out)
+            res = rst.parse_run(s.get("ookla", ""), s.get("ping", ""))
+        except Exception as e:
+            res = {"error": f"{type(e).__name__}: {e}"}
+        finally:
+            self.speed_status["router_running"] = False
+        row = {"ts": res.get("ts") or time.time(), "trigger": trigger, "location": "router", "server": res.get("server") or "router",
+               **{k: res.get(k) for k in ("down_mbps", "up_mbps", "idle_ms", "down_loaded_ms", "up_loaded_ms", "grade", "error")}}
+        db.add_speed_tests([row])
+        with self._lock:
+            self._analysis.clear()
+        return row
+
     def run_speedtest(self, trigger: str = "manual") -> dict[str, Any]:
         """Blocking; the web server runs it in a thread. The ping monitor pauses meanwhile."""
         if self.speed_status["running"]:
@@ -162,8 +193,8 @@ class Engine:
         finally:
             self.monitor.paused = False
             self.speed_status["running"] = False
-        row = {"ts": time.time(), "trigger": trigger, **res}
-        db.insert_many("speed_tests", [row])
+        row = {"ts": time.time(), "trigger": trigger, "location": "pc", **res}
+        db.add_speed_tests([row])
         self.speed_status["last"] = row
         with self._lock:
             self._analysis.clear()
@@ -233,8 +264,10 @@ class Engine:
             "asus": self.asus.status,
             "devolo": self.devolo.status,
             "discovery": self.discovery.status,
-            "speedtest": {"running": self.speed_status["running"]},
+            "speedtest": {"running": self.speed_status["running"], "router_running": self.speed_status["router_running"],
+                          "router_enabled": self.cfg.monitor.router_speedtest},
             "update": self.update_info,
+            "hostpc": self.host.status,
             "integrations": {s: {"enabled": getattr(self.cfg, s).enabled,
                                  "secret_set": bool(getattr(self.cfg, s).url) and
                                  secrets.has_secret(secrets.SERVICE_KINDS[s], secrets.service_ident(s, self.cfg)),
@@ -247,8 +280,9 @@ class Engine:
     _force_full = False
 
     @staticmethod
-    def _last_speedtest_ts() -> float:
-        rows = db.speed_tests(time.time() - 30 * 86400)
+    def _last_speedtest_ts(location: str = "pc") -> float:
+        rows = [x for x in db.speed_tests(time.time() - 30 * 86400) if (x.get("location") or "pc") == location
+                and not str(x.get("trigger") or "").startswith("router (ASUS")]
         return rows[-1]["ts"] if rows else 0.0
 
     def _loop(self) -> None:
@@ -256,6 +290,7 @@ class Engine:
         last_update_check = time.time() - self.cfg.updates.check_hours * 3600 + 120   # first check 2 min after start
         # With no test yet, the first scheduled one runs 10 minutes after start.
         last_speed = self._last_speedtest_ts() or time.time() - self.cfg.monitor.speedtest_hours * 3600 + 600
+        last_router_speed = self._last_speedtest_ts("router") or time.time() - self.cfg.monitor.router_speedtest_hours * 3600 + 900
         while not self._stop.is_set():
             if not self.paused:
                 try:
@@ -264,6 +299,11 @@ class Engine:
                     self.asus.poll(self.router_password(), full=full)
                 except Exception:  # A collector bug must not stop the engine.
                     log.exception("ASUS poll crashed")
+                if self.cfg.hostpc.enabled:
+                    try:
+                        self.host.poll(db.units())
+                    except Exception:
+                        log.exception("host PC sensor failed")
                 if self.devolo.due(time.time()):
                     try:
                         self.devolo.poll()
@@ -273,6 +313,9 @@ class Engine:
                 if m.speedtest_hours and time.time() - last_speed > m.speedtest_hours * 3600:
                     last_speed = time.time()
                     threading.Thread(target=self.run_speedtest, args=("scheduled",), daemon=True).start()
+                if m.router_speedtest and m.router_speedtest_hours and time.time() - last_router_speed > m.router_speedtest_hours * 3600:
+                    last_router_speed = time.time()
+                    threading.Thread(target=self.run_router_speedtest, args=("scheduled",), daemon=True).start()
                 u = self.cfg.updates
                 if u.check_automatically and time.time() - last_update_check > u.check_hours * 3600:
                     last_update_check = time.time()

@@ -16,6 +16,7 @@
 <script src="/static/charts.js" defer></script>
 <script src="/static/graphs.js" defer></script>
 <script src="/static/map.js" defer></script>
+<script src="/static/router.js" defer></script>
 </head>
 <body>
 <header>
@@ -23,6 +24,7 @@
   <nav id="tabs" hidden>
     <button data-tab="overview" class="on">Overview</button>
     <button data-tab="analysis">Analysis</button>
+    <button data-tab="router">Router</button>
     <button data-tab="topology">Topology</button>
     <button data-tab="tests">Tests</button>
     <button data-tab="graphs">Graphs</button>
@@ -86,6 +88,10 @@
     <div class="card"><h3>Device health (poorest first) <button class="help" data-help="health">?</button></h3><table id="an-devices" class="clickable"></table></div>
   </section>
 
+  <section id="router" class="tab" hidden>
+    <div class="settings-layout"><nav id="router-nav" class="subnav"></nav><div id="router-body"><p class="muted">Loading…</p></div></div>
+  </section>
+
   <section id="topology" class="tab" hidden>
     <div class="card">
       <div class="toolbar"><h3 style="margin:0">Network map <button class="help" data-help="topology">?</button></h3>
@@ -134,6 +140,12 @@
       <div class="card"><h3>Radio transmit failures</h3><div id="gr-radio" class="chart-box"></div></div>
     </div>
     <div class="card"><h3>Powerline link speeds <span class="muted small">slower direction of each pair</span></h3><div id="gr-plc" class="chart-box"></div></div>
+    <div class="grid">
+      <div class="card"><h3>How busy your access points' channels are <span class="muted small">their own reports, heard by this PC</span></h3>
+        <div id="gr-air" class="chart-box"></div></div>
+      <div class="card"><h3>Broadcast and multicast reaching this PC</h3><div id="gr-lan" class="chart-box"></div>
+        <p class="muted small">Packets per second. Sudden rises point at a device flooding the network.</p></div>
+    </div>
   </section>
 
   <section id="tests" class="tab" hidden>
@@ -150,25 +162,33 @@
     </div>
     <div class="card">
       <div class="toolbar"><h3 style="margin:0">Speed test and bufferbloat <button class="help" data-help="speedtest">?</button></h3>
-        <button id="speed-run">Run speed test</button> <span id="speed-msg" class="muted"></span></div>
-      <div id="speed-last"></div>
-      <canvas id="speed-chart" class="trend"></canvas><div class="legend"><span><i style="background:var(--accent)"></i>download</span><span><i style="background:var(--good)"></i>upload</span></div>
-      <table id="speed-table"></table>
+        <button id="speed-run">Test from this PC</button> <button id="speed-run-router">Test on the router</button>
+        <span id="speed-msg" class="muted"></span></div>
+      <p class="muted small">The router's test measures the internet line itself. The test from this PC also includes its path to the router
+        (Wi-Fi, powerline, switches), so a big difference between the two points at that path.</p>
+      <div id="speed-last" class="grid"></div>
+      <div id="speed-chart" class="chart-box"></div>
+      <div class="table-scroll short"><table id="speed-table"></table></div>
     </div>
   </section>
 
   <section id="devices" class="tab" hidden>
     <div class="card">
-      <div class="toolbar"><input id="dev-search" type="search" placeholder="Search name, IP, MAC, vendor">
+      <div class="toolbar"><input id="dev-search" type="search" placeholder="Search name, IP, MAC, vendor, owner">
+        <select id="dev-unit"><option value="">All units</option></select>
+        <select id="dev-band"><option value="">All connections</option><option value="2.4">2.4 GHz</option><option value="5">5 GHz</option><option value="6">6 GHz</option><option value="wired">Wired / LAN</option></select>
+        <select id="dev-type"><option value="">All types</option></select>
         <label><input id="dev-online" type="checkbox" checked> Connected now</label>
-        <label><input id="dev-watched" type="checkbox"> Watched only</label>
-        <span id="dev-count" class="muted"></span> <button class="help" data-help="devices">?</button>
+        <label><input id="dev-watched" type="checkbox"> Watched</label>
+        <label><input id="dev-problems" type="checkbox"> Problems only</label>
+        <span id="dev-count" class="muted"></span> <button class="help" data-help="devices">?</button></div>
+      <div class="toolbar small"><span class="legend"><span><i class="hb good"></i>healthy</span><span><i class="hb warn"></i>fair</span><span><i class="hb bad"></i>poor</span><span><i class="hb"></i>no Wi-Fi data</span></span>
         <span class="spacer"></span>
         <button id="scan-sweep" class="secondary">Find devices now</button>
         <button id="scan-services" class="secondary">Look up names and services</button>
         <button id="scan-ports" class="secondary">Scan ports (all)</button>
         <span id="scan-msg" class="muted small"></span></div>
-      <table id="devices-table" class="clickable"></table>
+      <div class="table-scroll"><table id="devices-table" class="clickable sortable"></table></div>
     </div>
   </section>
 
@@ -182,9 +202,15 @@
           <option value="connect,disconnect">Connects / disconnects</option>
         </select>
         <select id="ev-hours"><option value="1">1 h</option><option value="24" selected>24 h</option><option value="168">7 days</option></select>
+        <input id="ev-dev" type="search" list="ev-devlist" placeholder="Filter by device"><datalist id="ev-devlist"></datalist>
+        <select id="ev-unit"><option value="">All units</option></select>
+        <select id="ev-band"><option value="">All bands</option><option value="2.4">2.4 GHz</option><option value="5">5 GHz</option><option value="6">6 GHz</option></select>
+        <span id="ev-count" class="muted small"></span>
         <button class="help" data-help="events">?</button>
       </div>
-      <table id="events-table"></table>
+      <div class="toolbar small legend"><span><i class="ek kick"></i>kicked</span><span><i class="ek disconnect"></i>disconnected / left</span>
+        <span><i class="ek roam"></i>roaming</span><span><i class="ek connect"></i>connected</span><span><i class="ek assoc_failed"></i>failed to join</span></div>
+      <div class="table-scroll"><table id="events-table"></table></div>
     </div>
   </section>
 

@@ -71,6 +71,8 @@ def build_app(engine: Engine, auth: Auth) -> web.Application:
     r.add_get("/api/connect", connect_info)
     r.add_get("/api/connect/qr.svg", connect_qr)
     r.add_get("/api/graphs", graphs_get)
+    r.add_get("/api/units/{mac}/detail", unit_detail)
+    r.add_get("/api/hostpc", hostpc_get)
     r.add_get("/api/devices/{mac}/graphs", device_graphs)
     r.add_get("/manifest.webmanifest", manifest)
     r.add_get("/icon-{size:(180|192|512)}.png", icon)
@@ -188,6 +190,14 @@ async def units(request: web.Request) -> web.Response:
 
 async def devices(request: web.Request) -> web.Response:
     devs = db.devices()
+    try:
+        health = (await asyncio.to_thread(request.app[ENGINE].analysis, 24))["devices"]
+    except Exception:  # analysis must never break the device list
+        health = {}
+    for d in devs:
+        h = health.get(d["mac"])
+        if h:
+            d["health"] = h["score"]
     now_at = {s["mac"]: s for s in db.latest_stations()}
     for d in devs:
         s = now_at.get(d["mac"])
@@ -306,6 +316,10 @@ async def monitor_history(request: web.Request) -> web.Response:
 
 async def speedtest_run(request: web.Request) -> web.Response:
     engine: Engine = request.app[ENGINE]
+    body = await request.json() if request.can_read_body else {}
+    if (body or {}).get("where") == "router":
+        res = await asyncio.to_thread(engine.run_router_speedtest, "manual")
+        return web.json_response(res, status=409 if (res.get("error") or "").startswith(("router speed tests are off", "a router")) else 200)
     res = await asyncio.to_thread(engine.run_speedtest, "manual")
     return web.json_response(res, status=409 if res.get("error") == "a speed test is already running" else 200)
 
@@ -394,6 +408,23 @@ async def graphs_get(request: web.Request) -> web.Response:
     except ValueError:
         hours = 24.0
     return web.json_response(await asyncio.to_thread(graphs.collect, hours))
+
+
+async def unit_detail(request: web.Request) -> web.Response:
+    from .. import unitview
+    d = await asyncio.to_thread(unitview.detail, request.match_info["mac"])
+    return web.json_response(d) if d else web.json_response({"error": "unknown unit"}, status=404)
+
+
+async def hostpc_get(request: web.Request) -> web.Response:
+    engine = request.app[ENGINE]
+    units = {u["mac"]: u.get("alias") or u.get("model") or u["mac"] for u in db.units()}
+    scan = db.air_scan_latest()
+    for b in scan:
+        b["unit_name"] = units.get(b.get("own_unit"))
+    st = engine.host.status
+    return web.json_response({"enabled": engine.cfg.hostpc.enabled, "link": st.get("link"), "adapters": st.get("adapters"),
+                              "last_scan": st.get("last_scan"), "scan": scan})
 
 
 async def device_graphs(request: web.Request) -> web.Response:

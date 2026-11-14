@@ -40,6 +40,7 @@ class UnitResult:
     counters: dict[str, dict[str, int]] = field(default_factory=dict)
     events: list[dict[str, Any]] = field(default_factory=list)
     settings: dict[str, str] | None = None
+    info: dict[str, Any] = field(default_factory=dict)     # snapshot shown on the Router tab
     sections: dict[str, str] = field(default_factory=dict)
 
 
@@ -67,6 +68,10 @@ def parse_unit(text: str, mac: str, ip: str, main: bool) -> UnitResult:
     r.events = P.parse_log_events(s.get("log", ""), unit=mac)
     if "settings" in s:
         r.settings = P.parse_nvram_kv(s["settings"])
+    r.info = {"identity": r.identity, **P.parse_uptime(s.get("uptime", "")), "ifaces": P.parse_iw_dev(s.get("iw_dev", "")),
+              "iwconfig": P.parse_iwconfig(s.get("iwconfig", "")), "chip": r.chip}
+    if s.get("port_status", "").strip():
+        r.info["ports"] = P._json(s["port_status"])
     return r
 
 
@@ -138,6 +143,7 @@ class AsusCollector:
                 alias="Main router" if r.main else (aliases.get(r.mac) or {}).get("alias"),
                 parent_hint=None if r.main else (aliases.get(r.mac) or {}).get("prefer_parent"),
                 reachable=1 if r.ok else 0, last_seen=now if r.ok else None, last_error=r.error or "",
+                info=json.dumps({**r.info, "ts": now}, default=str) if r.ok else None,
                 macs=json.dumps(sorted({r.mac, *(i["addr"] for i in P.parse_iw_dev(r.sections.get("iw_dev", "")) if i.get("addr")),
                                         *backhaul.get(r.mac, {}).values()})) if r.ok else None)
             if not r.ok:
@@ -166,6 +172,11 @@ class AsusCollector:
                 db.upsert_unit(unit_mac, role="node", alias=a.get("alias"), reachable=0, parent_hint=a.get("prefer_parent"),
                                last_error="not in the router's managed node list (cfg_device_list)",
                                macs=json.dumps(sorted({unit_mac, *backhaul.get(unit_mac, {}).values()})))
+
+        if "ookla_history" in s:
+            from .speedtest import parse_history
+            db.add_speed_tests([{**r, "trigger": "router (ASUS app)", "location": "router"}
+                                for r in parse_history(s["ookla_history"])])
 
         # Mesh-wide client view from the router.
         table = oui.load(download=False) if full else None

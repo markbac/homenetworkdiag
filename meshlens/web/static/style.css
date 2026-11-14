@@ -145,3 +145,38 @@ svg.chart .ax { font: 11px system-ui, sans-serif; fill: var(--muted); }
 .url-row a { font-weight: 600; word-break: break-all; }
 @media (max-width: 700px) { header { gap: 10px; } nav button { padding: 6px 8px; } .grid { grid-template-columns: 1fr; } }
 .update-banner[hidden] { display: none; }
+
+/* Scrolling tables with headers that stay in view */
+.table-scroll { max-height: calc(100vh - 260px); min-height: 160px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
+.table-scroll.short { max-height: 420px; min-height: 0; border: 0; }
+.table-scroll table { border-collapse: separate; border-spacing: 0; }
+.table-scroll thead th { position: sticky; top: 0; background: var(--card); z-index: 1; box-shadow: inset 0 -1px 0 var(--line); }
+table.sortable th[data-sort] { cursor: pointer; user-select: none; }
+table.sortable th.asc::after { content: " ▲"; } table.sortable th.desc::after { content: " ▼"; }
+/* Health colour on device rows */
+tr.hrow td:first-child { border-left: 4px solid transparent; }
+tr.h-good td:first-child { border-left-color: var(--good); } tr.h-warn td:first-child { border-left-color: var(--warn); }
+tr.h-bad td:first-child { border-left-color: var(--bad); } tr.h-bad { background: color-mix(in srgb, var(--bad) 6%, transparent); }
+.legend i.hb { display: inline-block; width: 4px; height: 12px; margin-right: 5px; background: var(--line); vertical-align: middle; }
+.legend i.hb.good { background: var(--good); } .legend i.hb.warn { background: var(--warn); } .legend i.hb.bad { background: var(--bad); }
+/* Band pills */
+.pill.b24 { background: color-mix(in srgb, var(--c6) 22%, transparent); } .pill.b5 { background: color-mix(in srgb, var(--c1) 22%, transparent); }
+.pill.b6 { background: color-mix(in srgb, var(--c2) 22%, transparent); }
+/* Wi-Fi events by kind */
+tr.ev td:first-child { border-left: 4px solid transparent; }
+tr.ev-kick td:first-child { border-left-color: var(--bad); } tr.ev-kick { background: color-mix(in srgb, var(--bad) 6%, transparent); }
+tr.ev-disconnect td:first-child { border-left-color: var(--warn); } tr.ev-roam td:first-child { border-left-color: var(--c2); }
+tr.ev-connect td:first-child { border-left-color: var(--good); } tr.ev-assoc_failed td:first-child { border-left-color: var(--c4); }
+.evk { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; background: var(--chip); }
+.ek-kick { background: var(--bad); color: #fff; } .ek-disconnect { background: color-mix(in srgb, var(--warn) 30%, transparent); }
+.ek-roam { background: color-mix(in srgb, var(--c2) 25%, transparent); } .ek-connect { background: color-mix(in srgb, var(--good) 25%, transparent); }
+.ek-assoc_failed { background: color-mix(in srgb, var(--c4) 25%, transparent); }
+.legend i.ek { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 5px; vertical-align: middle; }
+.legend i.ek.kick { background: var(--bad); } .legend i.ek.disconnect { background: var(--warn); } .legend i.ek.roam { background: var(--c2); }
+.legend i.ek.connect { background: var(--good); } .legend i.ek.assoc_failed { background: var(--c4); }
+#ev-dev { min-width: 200px; }
+/* Router tab */
+.kv-wide { grid-template-columns: 170px 1fr; }
+.bar { display: inline-block; width: 70px; height: 8px; background: var(--chip); border-radius: 4px; vertical-align: middle; overflow: hidden; }
+.bar i { display: block; height: 100%; background: var(--good); } .bar i.warn { background: var(--warn); } .bar i.bad { background: var(--bad); }
+tr.clickrow { cursor: pointer; }
