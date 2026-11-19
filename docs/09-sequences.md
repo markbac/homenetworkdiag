@@ -59,6 +59,30 @@ sequenceDiagram
 
 Probes that are already adopted are matched by id whatever IP they get, so DHCP changes and moves need no configuration.
 
+### As built in 0.9 (c5-probe API 0.2.0)
+
+```mermaid
+sequenceDiagram
+    participant P as Probe
+    participant M as MeshLens
+    participant U as User (web UI)
+    P-->>M: UDP 47800 {"type":"hndprobe","id",...} every 30 s (and mDNS)
+    M->>P: GET /api/info (every 60 s)
+    U->>M: Router → Probes → Pair
+    M->>P: POST /api/adopt
+    P-->>U: 6-digit code on the probe's screen (5 min)
+    U->>M: types the code
+    M->>P: POST /api/adopt/confirm {code}
+    P-->>M: {token}  (stored in Credential Manager)
+    U->>M: room / spot
+    M->>P: POST /api/placement (Bearer token)
+    loop every 5 min
+        M->>P: GET /api/wifi.json, /api/air.json, /api/alerts.json, /api/env (Bearer token)
+    end
+```
+
+Not yet: `/api/sync` (records while MeshLens is closed) and `/api/nettest` — markbac/esp32 issues #5 and #6.
+
 ## 3. Moving a probe (placement change)
 
 ```mermaid

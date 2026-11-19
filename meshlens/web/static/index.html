@@ -17,6 +17,7 @@
 <script src="/static/graphs.js" defer></script>
 <script src="/static/map.js" defer></script>
 <script src="/static/router.js" defer></script>
+<script src="/static/guidance.js" defer></script>
 </head>
 <body>
 <header>
@@ -57,7 +58,10 @@
       <div><h3>Network health <button class="help" data-help="health">?</button></h3>
         <p id="net-summary" class="muted"></p><div id="net-counts"></div></div>
     </div>
-    <div class="card"><h3>Needs attention <span class="muted small">(last 24 h)</span> <button class="help" data-help="issues">?</button>
+    <div class="card" id="setup-card" hidden><h3>Finish setting up <a href="#" class="small" data-goto="settings" data-set="checklist">setup checklist →</a></h3>
+      <ul id="setup-todo" class="small"></ul></div>
+    <div class="card"><h3>Needs attention <span class="muted small">(last 24 h)</span>
+      <button class="secondary small-btn" data-mark-change title="Say what you changed; MeshLens compares before and after">Mark a change</button> <button class="help" data-help="issues">?</button>
       <a href="#" class="small" data-goto="analysis">all issues →</a></h3><div id="top-issues"></div></div>
     <div class="grid">
       <div class="card"><h3>Mesh units <button class="help" data-help="units">?</button></h3><table id="units-table"></table></div>
@@ -79,6 +83,8 @@
       </div>
       <div id="an-issues"></div>
     </div>
+    <div class="card" id="an-resolved-card" hidden><h3>Resolved in the last 7 days <span class="muted small">no longer seen for a day</span>
+      <button class="help" data-help="issue-status">?</button></h3><table id="an-resolved"></table></div>
     <div class="grid">
       <div class="card"><h3>Mesh unit health <button class="help" data-help="health">?</button></h3><table id="an-units"></table></div>
       <div class="card"><h3>Week on week <button class="help" data-help="trends">?</button></h3><table id="an-compare"></table>

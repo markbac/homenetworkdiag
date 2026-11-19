@@ -28,6 +28,16 @@ powershell -ExecutionPolicy Bypass -File packaginguild.ps1            # dist\Me
 
 Data lives in `%LOCALAPPDATA%\MeshLens` (`config.yaml`, `meshlens.db`, `raw\*.jsonl`, `logs\meshlens.log`, `oui\` vendor lists). Set `MESHLENS_HOME` to use another folder (e.g. a scratch instance for testing).
 
+## Testing against real data without touching it
+
+1. Snapshot the live database: `python -c "import sqlite3; s=sqlite3.connect('file:%LOCALAPPDATA%/MeshLens/meshlens.db?mode=ro', uri=True); d=sqlite3.connect('scratch/meshlens.db'); s.backup(d)"`.
+2. Copy `config.yaml` into the scratch folder and make it offline: router `host: 127.0.0.1`, `port: 1`; web `bind: 127.0.0.1`,
+   `port: 8799`; `devolo`, `discovery`, `monitor`, `hostpc` `enabled: false`; updates `check_automatically: false`.
+3. `set MESHLENS_HOME=<scratch folder>` and run `.venv\Scripts\python -m meshlens`; create a throwaway dashboard password.
+4. For analysis only (no web server), build an `Engine` without starting it and call `analysis(24)` / `channels()`.
+
+Never point a test instance at the live data folder: the running tray app owns it.
+
 ## Layout
 
 | Path | What |
@@ -47,7 +57,10 @@ Data lives in `%LOCALAPPDATA%\MeshLens` (`config.yaml`, `meshlens.db`, `raw\*.js
 | `meshlens/monitor.py` | Latency / jitter / loss monitor, one row per target per minute |
 | `meshlens/net/speedtest.py` | Speed test with bufferbloat grade (idle, loaded down, loaded up) |
 | `meshlens/topology.py` | Network map: units, backhaul, powerline, devices |
-| `meshlens/analysis_net.py` | Issue rules for powerline, latency, speed, bufferbloat, ports |
+| `meshlens/analysis_net.py` | Issue rules for powerline, latency, speed, bufferbloat, ports, radar, loops, settings consistency, probes; key-device suggestions |
+| `meshlens/channels.py` | Channel plan (5 GHz blocks, 2.4 GHz 1/6/11) and radar incidents |
+| `meshlens/collectors/probes.py` | ESP32 probes: discovery, pairing, polling, storage, Probes page data |
+| `meshlens/web/static/guidance.js` | Step-by-step links, "check it worked", grouping, checklist, hidden issues, marked changes |
 | `meshlens/integrations.py` | Read-only connection tests for Pi-hole, Home Assistant, UniFi |
 | `meshlens/engine.py` | Background scheduler, retention |
 | `meshlens/web/` | aiohttp server, login, JSON API, static UI, `static/help.html` (in-app help) |
@@ -77,7 +90,8 @@ Data lives in `%LOCALAPPDATA%\MeshLens` (`config.yaml`, `meshlens.db`, `raw\*.js
 | Latency / jitter / loss monitors, speed tests, bufferbloat | TST-01/02/03/05, ISP-05 | Done |
 | Tray status colour, start with Windows, installer, CI, release workflow | UI-06, NFR-01 | Done |
 | Next | Pi-hole / HA / UniFi / TP-Link switch collectors, reports, timeline, IPv6, rogue AP/DHCP checks | Not started |
-| Probes | ESP32 probes: discovery, pairing, room, Wi-Fi scans, air monitor, alerts, channel plan (see 04-esp32-probes.md) | First version; probe sync and tests not yet |
+| Probes | ESP32 probes: discovery, pairing, room, Wi-Fi scans, air monitor, alerts, channel plan (see 04-esp32-probes.md) | First version; probe sync, tests, airtime, push: markbac/esp32 #5-#9 |
+| Guidance | Step-by-step fixes, check-it-worked, glossary, setup checklist, marked changes with before/after, issue history, hiding | Done |
 
 ## Rules for contributors
 

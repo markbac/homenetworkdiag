@@ -21,6 +21,7 @@ from .net import icmp, speedtest
 from .store import db, jsonl
 
 log = logging.getLogger("meshlens.engine")
+log_ = log
 
 
 class Engine:
@@ -109,9 +110,91 @@ class Engine:
         res = analysis.analyse(db.events(since, limit=200000), db.station_samples_since(since), db.latest_radio(),
                                db.units(), db.devices(), db.latest_settings(), self.cfg.analysis, now, net=net,
                                hidden=[(h["rule"], h["subject"]) for h in db.hidden_issues()])
+        # Issue history: new / ongoing, and what was resolved (only from the standard 24 h view).
+        try:
+            log = db.log_issues(res["issues"], now) if hours == 24 else {}
+            for i in res["issues"]:
+                e = log.get((i["rule"], str(i.get("subject"))))
+                if e:
+                    i["first_seen"] = e["first_seen"]
+                    i["status"] = "new" if now - e["first_seen"] < 86400 else "ongoing"
+            res["resolved"] = [r for r in db.resolved_issues(now - 7 * 86400)]
+        except Exception:
+            log_.exception("issue history failed")
         with self._lock:
             self._analysis[hours] = (now, res)
         return res
+
+    # ------------------------------------------------------------ changes the user marked, before / after
+    def change_impact(self, ts: float, now: float | None = None) -> dict[str, Any]:
+        """The same measures before and after a moment: equal windows, up to 24 h each side."""
+        import statistics
+        now = now or time.time()
+        hrs = max(0.25, min(24.0, (now - ts) / 3600))
+        w = hrs * 3600
+
+        def measures(a: float, b: float) -> dict[str, Any]:
+            pings = [p for p in db.ping_minutes(a) if p["ts"] < b]
+            def loss(label: str):
+                rs = [p for p in pings if (p.get("label") or "").lower() == label or p.get("target") == label]
+                sent = sum(r["sent"] or 0 for r in rs)
+                spikes = sum(1 for r in rs if (r.get("max_ms") or 0) >= 200)
+                return (round(100 * sum(r["lost"] or 0 for r in rs) / sent, 2) if sent else None,
+                        round(spikes / max(1, len(rs)) * 60, 1) if rs else None)
+            rl, rs_ = loss("router")
+            il, is_ = loss("1.1.1.1")
+            disc = db.events_count(a, b, ["disconnect", "kick"])
+            smp = db.station_samples_between(a, b)
+            polls: dict[float, set] = {}
+            for x in smp:
+                if x.get("band") == "2.4":
+                    polls.setdefault(x["ts"], set()).add(x["mac"])
+            on24 = round(statistics.mean(len(v) for v in polls.values()), 1) if polls else None
+            sp = [x for x in db.speed_tests(a) if x["ts"] < b and not x.get("error") and (x.get("location") or "pc") == "pc"]
+            return {"router_loss_pct": rl, "router_spikes_per_h": rs_, "internet_loss_pct": il, "internet_spikes_per_h": is_,
+                    "disconnects_per_h": round(disc / hrs, 1), "devices_on_24": on24,
+                    "speed_down": round(statistics.median(x["down_mbps"] for x in sp)) if sp else None,
+                    "speed_up": round(statistics.median(x["up_mbps"] for x in sp if x.get("up_mbps") is not None)) if sp else None,
+                    "grade": sp[-1].get("grade") if sp else None, "speed_tests": len(sp)}
+        return {"hours": round(hrs, 1), "before": measures(ts - w, ts), "after": measures(ts, min(now, ts + w))}
+
+    def checklist(self) -> list[dict[str, Any]]:
+        """Setup steps and whether each is done (None = optional / not applicable)."""
+        now = time.time()
+        r, st = self.cfg.router, self.asus.status
+        units = db.units()
+        devs = db.devices()
+        probes = db.probes()
+        from .analysis_net import key_device_suggestions
+        sugg = key_device_suggestions(devs, db.open_ports(), units=units)
+        items = [
+            {"id": "router_password", "label": "Router login stored", "done": secrets.has_secret("asus", secrets.router_ident(r.username, r.host, r.port)),
+             "detail": f"{r.username}@{r.host}:{r.port}", "goto": "settings:router"},
+            {"id": "router_poll", "label": "Router read successfully", "done": bool(st.get("last_poll")) and not st.get("error"),
+             "detail": st.get("error") or (f"last read {round((now - st['last_poll']) / 60)} min ago" if st.get("last_poll") else "not yet"),
+             "goto": "settings:router"},
+            {"id": "nodes", "label": "Every mesh unit readable", "done": bool(units) and all(u.get("reachable") for u in units),
+             "detail": ", ".join(u.get("alias") or u["mac"] for u in units if not u.get("reachable")) or f"{len(units)} units",
+             "goto": "router"},
+            {"id": "speeds", "label": "Your internet plan's speed entered", "done": bool(self.cfg.monitor.expected_down_mbps),
+             "detail": (f"{self.cfg.monitor.expected_down_mbps:.0f}/{self.cfg.monitor.expected_up_mbps:.0f} Mbit/s"
+                        if self.cfg.monitor.expected_down_mbps else "so MeshLens can tell when the line is slower than it should be"),
+             "goto": "settings:monitor"},
+            {"id": "watched", "label": "Key devices watched", "done": not sugg and any(d.get("watched") for d in devs),
+             "detail": (f"{sum(1 for d in devs if d.get('watched'))} watched" + (f"; suggested: {', '.join(x['name'] for x in sugg[:6])}" if sugg else "")),
+             "goto": "watch-suggested", "suggested": [x["mac"] for x in sugg]},
+            {"id": "powerline", "label": "Powerline adapters found", "done": (bool(db.plc_adapters()) if self.cfg.devolo.enabled else None),
+             "detail": f"{len(db.plc_adapters())} adapters" if self.cfg.devolo.enabled else "turned off", "goto": "settings:devolo"},
+            {"id": "probes", "label": "Probes paired and placed",
+             "done": (all(p.get("paired") and p.get("room") for p in probes) if probes else None),
+             "detail": (", ".join(f"{p['id']}: {'paired' if p.get('paired') else 'not paired'}{', ' + p['room'] if p.get('room') else ', no room'}" for p in probes)
+                        or "optional: none found yet"), "goto": "probes"},
+            {"id": "hostpc", "label": "This PC used as a sensor", "done": self.cfg.hostpc.enabled, "detail": "air survey and LAN broadcast counts",
+             "goto": "settings:hostpc"},
+            {"id": "updates", "label": "Automatic update checks", "done": self.cfg.updates.check_automatically, "detail": "",
+             "goto": "settings:updates"},
+        ]
+        return items
 
     def set_issue_hidden(self, rule: str, subject: str, hidden: bool, title: str | None = None) -> None:
         db.set_issue_hidden(rule, subject, hidden, title)

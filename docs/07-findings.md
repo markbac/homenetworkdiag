@@ -94,3 +94,46 @@ The Fingbox (Domotz-registered `f0:23:b9:ed:95:4d`) was the main broadcast sourc
 - Broadcast/multicast analysis per source and per kind is the most valuable radio measurement (PRB-04, TST-06, DIA-02).
 - The tool's own scanning must be paced (NFR-02): an ARP sweep of a /23 every minute is exactly the problem above.
 - The router's multicast rate and IGMP snooping settings should be read and explained (ASUS-04).
+
+# Findings, 19 November 2026 (MeshLens 0.8.1 → 0.9.0)
+
+From a day of MeshLens data (router polls, powerline, pings, speed tests, this PC's air survey), worked through by hand and then
+turned into issue rules.
+
+## A. A network loop through a new wireless bridge
+
+- An RT-AX57 Go was added as an AiMesh node to bridge the office's wired devices over Wi-Fi, while the same switch still reached
+  the router over powerline: two paths.
+- Evidence: the router's own address and Wi-Fi clients of the router appeared *behind* the office powerline adapter; ping loss
+  from the PC to the router rose from under 0.6% an hour to 6-9% while it lasted; the switch, NAS, Home Assistant and Pi-hole
+  kept disappearing from the adapter's list.
+- Fixed by removing one path. MeshLens now records these sightings (`l2_loop`) and raises **network_loop**.
+
+## B. Radar on DFS channels, and devices left on 2.4 GHz
+
+- Four radar detections in a week, every one heard by the same node (Second Floor), on channels 100-112 and 52-64. One event
+  dropped 16 devices; five dual-band devices fell back to 2.4 GHz and the living-room TV streamer stayed there for hours,
+  streaming at a fraction of its 5 GHz rate. Smart Connect only steers back up on a very strong 2.4 GHz signal.
+- Fix: a fixed 5 GHz channel in 36-48. MeshLens now has **radar incidents**, **stuck_on_24** and the **channel plan**.
+
+## C. Bufferbloat came from the powerline path, not the line
+
+- Speed tests from the MeshLens PC through powerline: ~95 Mbit/s and bufferbloat grade C/D (300+ ms during upload) for days,
+  while the router's own test showed the 900/100 line. Through the wireless bridge: 391/95 Mbit/s, grade A.
+- MeshLens now raises **speed_path_changed** and the bufferbloat advice points at the path first.
+
+## D. Mixed security settings and firmware
+
+- PMF read from each unit: router *capable*, First Floor *required*, the BD4s and the AX57 *off*; firmware builds 58601 / 58453 /
+  58396 / 56747. Fits the failed joins seen on the BD4s: status 53 (invalid PMKID, mostly one Amazon device) and status 30
+  (temporarily rejected, Windows PCs with TP-Link adapters).
+- New issues: **pmf_mismatch**, **firmware_mismatch**, **join_failures** (the log lines have no MAC; paired by time).
+
+## E. Smaller ones
+
+- The Pi-hole was on Ethernet *and* Wi-Fi with the same address (**dual_homed**).
+- A TV kept joining the outdoor Garden unit at about -70 dBm (**outdoor_wander**).
+- One Tuya plug reconnected about 226 times a day and produced most of the issue list's noise (→ grouping and hiding).
+- All units restarted between 02:38 and 03:09 one night: firmware housekeeping (**mesh_restart**).
+- 2.4 GHz was on channel 9, overlapping 6 and 11. An unexplained 90%-busy 2.4 GHz spell at 20:00 wasn't any mesh device MeshLens
+  could see: the probes' airtime breakdown (esp32 issue #7) is needed to name it.

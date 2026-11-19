@@ -63,7 +63,7 @@ function deviceGraphsHtml(mac) {
   return `<h3>Graphs <select id="dg-hours" class="small-sel"><option value="6">6 h</option><option value="24" selected>24 h</option><option value="168">7 days</option></select></h3>
     <div id="dev-graphs" data-mac="${esc(mac)}">
       <h4>Signal</h4><div id="dg-signal" class="chart-box"></div>
-      <h4>Where it was connected</h4><div id="dg-where" class="chart-box"></div>
+      <h4>Where it was connected <span class="muted small">unit and band</span> <button class="help" data-help="band-timeline">?</button></h4><div id="dg-where" class="chart-box"></div>
       <h4>Link speed</h4><div id="dg-rate" class="chart-box"></div>
       <h4>Data used</h4><div id="dg-traffic" class="chart-box"></div>
       <h4>Wi-Fi events</h4><div id="dg-events" class="chart-box"></div>

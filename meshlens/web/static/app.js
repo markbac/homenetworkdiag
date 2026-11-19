@@ -112,11 +112,14 @@ function hideLabel(i) {
 function renderIssue(i, open = false) {
   const when = i.from ? `<span class="muted small">${esc(fmtTime(i.from))}${i.to && i.to !== i.from ? " – " + esc(fmtTime(i.to)) : ""}</span>` : "";
   return `<details class="issue ${esc(i.severity)}${i.hidden ? " hidden-issue" : ""}" ${open ? "open" : ""}>
-    <summary><span class="sev ${esc(i.severity)}">${esc(SEV[i.severity] || i.severity)}</span> <b>${esc(i.title)}</b> ${when}${i.hidden ? ' <span class="pill">hidden</span>' : ""}</summary>
+    <summary><span class="sev ${esc(i.severity)}">${esc(SEV[i.severity] || i.severity)}</span> <b>${esc(i.title)}</b> ${when}${i.times && i.times.length > 1 ? ` <span class="pill">×${i.times.length}</span>` : ""}${i.status === "new" ? ' <span class="pill new">new</span>' : ""}${i.hidden ? ' <span class="pill">hidden</span>' : ""}</summary>
     <div class="issue-body">
       <p><span class="lbl">Seen</span> ${esc(i.evidence)} ${subjectLink(i) ? "· " + subjectLink(i) : ""}</p>
       <p><span class="lbl">Why</span> ${esc(i.cause)}</p>
       ${i.fixes && i.fixes.length ? `<div><span class="lbl">Try</span><ol>${i.fixes.map((f) => `<li>${esc(f)}</li>`).join("")}</ol></div>` : ""}
+      ${typeof issueGuidance === "function" ? issueGuidance(i) : ""}
+      ${i.times && i.times.length > 1 ? `<p class="small muted"><span class="lbl">Times</span> ${i.times.slice(0, 12).map(([a, b]) => esc(fmtTime(a)) + (b && b !== a ? "–" + esc(new Date(b * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })) : "")).join("; ")}${i.times.length > 12 ? ` and ${i.times.length - 12} more` : ""}</p>` : ""}
+      ${i.first_seen ? `<p class="small muted">${i.status === "new" ? "First raised" : "Ongoing since"} ${esc(fmtTime(i.first_seen))}.</p>` : ""}
       <p class="small"><a href="#" data-help="${esc(i.help)}">More about this in Help</a>
         · <button class="linkish" data-hide-rule="${esc(i.rule)}" data-hide-subject="${esc(i.subject ?? "")}" data-hide-title="${esc(i.title)}"
             data-hidden="${i.hidden ? 1 : 0}" title="Hidden issues stay out of the counts and the health score; tick 'Show hidden' to see them again.">${esc(hideLabel(i))}</button></p>
@@ -142,11 +145,16 @@ document.addEventListener("click", async (e) => {
   });
   const tab = (location.hash || "#overview").slice(1).split("/")[0];
   if (tab === "analysis" || tab === "overview") LOADERS[tab]();
+  else if (tab === "settings" && currentSection === "hidden") loadSettings("hidden");
 });
 
 // ---------------------------------------------------------------- overview
 async function loadOverview() {
-  const [{ units }, a] = await Promise.all([refreshBase(), api("/api/analysis?hours=24")]);
+  if (!$("#top-issues").innerHTML) $("#top-issues").innerHTML = loadingHtml();
+  const [{ units }, a, chk] = await Promise.all([refreshBase(), api("/api/analysis?hours=24"), api("/api/checklist").catch(() => [])]);
+  const todo = chk.filter((x) => x.done === false);
+  $("#setup-card").hidden = !todo.length;
+  $("#setup-todo").innerHTML = todo.map((x) => `<li>${esc(x.label)} <span class="muted small">${esc(x.detail || "")}</span></li>`).join("");
   const n = a.network;
   $("#net-score").textContent = n.score ?? "–";
   $("#net-score").className = "score " + scoreClass(n.score);
@@ -154,7 +162,7 @@ async function loadOverview() {
   const c = n.issue_counts;
   $("#net-counts").innerHTML = ["high", "medium", "low", "info"].map((k) => `<span class="sev ${k}">${c[k]} ${SEV[k].toLowerCase()}</span>`).join(" ")
     + ` <span class="muted small">${esc(n.devices_poor)} of ${esc(n.devices_seen)} Wi-Fi devices in poor shape${n.hidden ? ` · ${esc(n.hidden)} hidden by you` : ""}</span>`;
-  const top = a.issues.filter((i) => !i.hidden && (i.severity === "high" || i.severity === "medium")).slice(0, 6);
+  const top = groupIssues(a.issues.filter((i) => !i.hidden && (i.severity === "high" || i.severity === "medium"))).slice(0, 6);
   $("#top-issues").innerHTML = top.length ? top.map((i) => renderIssue(i)).join("") : '<p class="muted">Nothing needs attention right now.</p>';
 
   $("#units-table").innerHTML = "<tr><th>Unit</th><th>Model</th><th>IP</th><th>Chip</th><th>Health</th><th>Status</th></tr>" +
@@ -180,12 +188,18 @@ async function loadOverview() {
 async function loadAnalysis() {
   await refreshBase();
   const hours = $("#an-hours").value, sev = $("#an-sev").value.split(",").filter(Boolean);
+  $("#an-issues").innerHTML = loadingHtml();
   const [a, t] = await Promise.all([api(`/api/analysis?hours=${hours}`), api("/api/trends?days=30")]);
   const showHidden = $("#an-hidden").checked;
   const nHidden = a.issues.filter((i) => i.hidden).length;
   $("#an-hidden-n").textContent = nHidden ? `(${nHidden})` : "";
-  const shown = a.issues.filter((i) => (!sev.length || sev.includes(i.severity)) && (showHidden || !i.hidden));
-  $("#an-count").textContent = `${shown.length} of ${a.issues.length} issues` + (nHidden && !showHidden ? ` · ${nHidden} hidden` : "");
+  const raw = a.issues.filter((i) => (!sev.length || sev.includes(i.severity)) && (showHidden || !i.hidden));
+  const shown = groupIssues(raw);
+  $("#an-count").textContent = `${shown.length} issues (${raw.length} raised)` + (nHidden && !showHidden ? ` · ${nHidden} hidden` : "");
+  const res = (a.resolved || []).filter((r) => r.severity !== "info");
+  $("#an-resolved-card").hidden = !res.length;
+  $("#an-resolved").innerHTML = res.map((r) => `<tr><td><span class="sev ${esc(r.severity)}">${esc(SEV[r.severity] || r.severity)}</span> ${esc(r.title)}</td>
+    <td class="muted small">raised ${esc(fmtTime(r.first_seen))}</td><td class="good small">resolved ${esc(ago(r.resolved_at))}</td></tr>`).join("");
   $("#an-issues").innerHTML = shown.length ? shown.map((i) => renderIssue(i)).join("") : '<p class="muted">No issues of this kind in this period.</p>';
   $("#an-units").innerHTML = "<tr><th>Unit</th><th>Health</th><th>Notes</th></tr>" +
     Object.entries(a.units).map(([mac, h]) => `<tr><td>${esc(unitName(mac))}</td><td class="${scoreClass(h.score)}">${h.score ?? "–"} ${h.label ? `<span class="muted small">${esc(h.label)}</span>` : ""}</td><td class="wrap muted">${esc(h.note || "")}</td></tr>`).join("");
@@ -389,6 +403,9 @@ function showDeviceEvents(mac) {
 // ---------------------------------------------------------------- settings
 // Field types: text, number, bool, list (one per line), select, secret (write-only).
 const SECTIONS = [
+  { id: "checklist", title: "Setup checklist", help: "checklist", note: "What MeshLens needs to see the whole network, and what is left to do.", custom: (el) => renderChecklist(el) },
+  { id: "changes", title: "Changes you made", help: "changes", note: "Mark a change and MeshLens compares the hours before and after it.", custom: (el) => renderChanges(el) },
+  { id: "hidden", title: "Hidden issues", help: "hide-issues", note: "Issues you chose to hide. They are still checked, but not counted.", custom: (el) => renderHiddenIssues(el) },
   { id: "dashboard", title: "Dashboard login", help: "set-dashboard", custom: renderDashboard },
   { id: "network", title: "Network", help: "set-network", note: "Your home network. Discovery (coming) scans only these subnets.", fields: [
     { k: "subnets", label: "Subnets (one per line)", type: "list", hint: "e.g. 10.0.10.0/23" },

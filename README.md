@@ -10,7 +10,22 @@ It is a **tray app started when needed** with a **web control interface** in the
 2. **The router's view** from the ASUS AiMesh system: every client, which node and band it is on, signal and link rate, roaming, DHCP, radio settings.
 3. **The radio's view** from small ESP32 probes placed around the house: what is actually happening in the air on 2.4 GHz and 5 GHz (channel crowding, air time, broadcasts, re-sends, signal per room), which neither Windows nor the router can see.
 
-> **Status: first working slice.** Tray app, web UI with login, and the read-only ASUS AiMesh collector (MediaTek BT8 + Qualcomm BD4) with Wi-Fi journeys and kick/roam detection. See [development](docs/13-development.md) to run it and for what is done.
+> **Status: 0.9 — in daily use.** Read-only ASUS AiMesh collector (MediaTek BT8, Qualcomm BD4, dual-band MediaTek nodes such as the RT-AX57 Go), devolo powerline, LAN discovery and ports, latency and speed monitors, and ESP32 probes (first version). See [what's new](CHANGELOG.md) and [development](docs/13-development.md).
+
+### What it finds
+
+- **Wi-Fi problems per device**: kick loops, roam storms, sticky clients, disconnects, weak signal, devices stuck on 2.4 GHz, devices wandering onto an outdoor unit, devices failing to join a unit (WPA3 key / PMF problems).
+- **Mesh problems**: many devices dropping at once, radar (DFS) forcing 5 GHz off its channel (with what each event did to your devices), channel hopping, busy channels, units restarting, different firmware or PMF settings between units.
+- **Wiring problems**: network loops behind powerline adapters, slow powerline links, wired port flaps and errors, a device on cable and Wi-Fi with one address.
+- **Line and path problems**: internet loss and spikes, bufferbloat, speed below your plan, this PC's path being the bottleneck (and when that path changed).
+- **A channel plan**: which 5 GHz block and 2.4 GHz channel to use, from this PC's and the probes' air surveys and the radar history.
+
+### Using it
+
+- Every issue says what was seen, why it probably happens, what to try, **step-by-step how to change it on the ASUS** and **how to check it worked**.
+- **Mark a change** when you change something; MeshLens marks every graph and compares before with after.
+- **Hide** a known, harmless issue for one device (it is still checked, just not counted); **Show hidden** brings it back.
+- **Setup checklist** (Settings) shows what is left to set up; **key devices** (DNS, NAS, Home Assistant, switches) are suggested for watching.
 
 ## Documents
 
@@ -28,6 +43,7 @@ It is a **tray app started when needed** with a **web control interface** in the
 | [Decisions](docs/10-decisions.md) | Agreed decisions (Python, tray app, read-only router, probe discovery and placements...) |
 | [Network inventory, services and security](docs/11-network-inventory-and-security.md) | Beyond Wi-Fi: services (mDNS, UPnP), open ports, router exposure and NAT, security hygiene, DHCP/DNS/ISP health, wired topology |
 | [Topology, history and enrichment](docs/12-topology-history-enrichment.md) | Interactive map, device pages with Wi-Fi details and handovers, history explorer, manual enrichment, feature backlog |
+| [Changelog](CHANGELOG.md) | What changed in each release |
 | [Development](docs/13-development.md) | How to run and test, code layout, what the first slice implements |
 
 ## Related projects

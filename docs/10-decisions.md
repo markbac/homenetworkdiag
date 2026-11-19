@@ -4,6 +4,12 @@ A running log of agreed decisions (lightweight ADRs). Newest first.
 
 | # | Date | Decision | Why / consequences |
 |---|---|---|---|
+| D-33 | 2026-11-19 | **Hiding is per rule and subject**, never global: a hidden issue is still computed and returned (`hidden: true`) but left out of counts, the summary and health scores. | Users silence a known, harmless device without losing other issues about it. |
+| D-32 | 2026-11-19 | **Issue history is kept from the 24 h view only** (`issue_log`): new for a day, resolved once absent for a day; info issues aren't tracked. | One consistent definition; other periods don't flap the status. |
+| D-31 | 2026-11-19 | **Marked changes** compare equal windows (up to 24 h) before and after, with measures that need no tuning (loss, spikes, disconnects, devices on 2.4 GHz, speed tests). | Simple, honest before/after; the user judges. |
+| D-30 | 2026-11-19 | **Probe tokens live in the Windows Credential Manager** (`probe:<id>`); a paired probe's address only changes when its old address stops answering as that probe; announcements are trusted for their *source* address only. | Nothing on the LAN can redirect MeshLens's token. |
+| D-29 | 2026-11-19 | **`iwpriv get_mac_table` / `iwpriv stat` added to the read-only allow-list**, only on MediaTek units without `mwctl`/`hostapd_cli`; unparsed output is kept for verification. | Display-only driver commands; needed for dual-band MediaTek nodes. |
+| D-28 | 2026-11-19 | **No generic "two devices share an address" issue**: stored addresses can be stale after a lease moves. Only the same host on cable and Wi-Fi is reported. | Avoids false alarms seen on real data. |
 | D-26 | 2026-11-13 | **UniFi data comes from the local UniFi Network controller API** (9.1.120, running on the same mini PC, ports 8080/8443), using a **View Only** local admin created for MeshLens (credentials stored with DPAPI). Fallback: the switch's own SSH (`mca-dump`, device SSH authentication is enabled in the controller as `streakyb`). | Controller already aggregates port stats, PoE, LLDP and client-to-port mapping; read-only role enforces D-04-style safety. |
 | D-25 | 2026-11-13 | **Keep hourly and daily summaries for 12 months**, in addition to 1 month of raw and per-minute data (D-20). | Long-term trends (ISP, kicks, busyness) survive at a few MB. |
 | D-24 | 2026-11-13 | **Reports** contain: summary of findings, evidence charts, device table; option to anonymise names and MACs for sharing. | Proposal accepted. |
