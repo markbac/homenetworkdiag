@@ -106,6 +106,16 @@ class DevoloConfig:
 
 
 @dataclass
+class ProbesConfig:
+    """MeshLens ESP32 radio probes (docs/04-esp32-probes.md): found automatically, paired by the user."""
+
+    enabled: bool = True
+    addresses: list[str] = field(default_factory=list)   # probes to ask directly (if announcements don't arrive)
+    poll_seconds: int = 60       # /api/info: is it there, where is it
+    scan_seconds: int = 300      # access points, air monitor, alerts, environment
+
+
+@dataclass
 class DiscoveryConfig:
     """LAN discovery (DEV-01, SVC-01..03) and port scans (PRT-01..05). Paced so it never floods the network."""
 
@@ -196,6 +206,8 @@ class AnalysisConfig:
     unit_mem_pct: float = 90.0        # memory in use
     unit_temp_c: float = 85.0         # hottest chip sensor
     conntrack_pct: float = 80.0       # router's connection table
+    join_fail_count: int = 10         # failed joins by one device to one unit before it is an issue
+    stuck_24_minutes: int = 60        # a dual-band device on 2.4 GHz this long after leaving 5/6 GHz
 
 
 @dataclass
@@ -210,6 +222,7 @@ class Config:
     devices: list[DeviceLogin] = field(default_factory=list)
     analysis: AnalysisConfig = field(default_factory=AnalysisConfig)
     devolo: DevoloConfig = field(default_factory=DevoloConfig)
+    probes: ProbesConfig = field(default_factory=ProbesConfig)
     discovery: DiscoveryConfig = field(default_factory=DiscoveryConfig)
     monitor: MonitorConfig = field(default_factory=MonitorConfig)
     updates: UpdateConfig = field(default_factory=UpdateConfig)
@@ -280,7 +293,7 @@ def validate(cfg: Config) -> list[str]:
     for svc in (cfg.pihole, cfg.homeassistant, cfg.unifi):
         if svc.enabled and not svc.url.startswith(("http://", "https://")):
             errs.append(f"{type(svc).__name__.replace('Config', '')} address must start with http:// or https://")
-    for s in cfg.devolo.adapters + cfg.monitor.extra_targets + cfg.monitor.internet_targets:
+    for s in cfg.devolo.adapters + cfg.probes.addresses + cfg.monitor.extra_targets + cfg.monitor.internet_targets:
         if not s or " " in s:
             errs.append(f"'{s}' is not an address or host name")
     if cfg.discovery.port_set not in ("top100", "top1000"):

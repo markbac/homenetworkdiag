@@ -17,13 +17,16 @@ async function loadRouter() {
   if (!routerSel) routerSel = order.length ? order[0].mac : "pc";
   $("#router-nav").innerHTML = order.map((u) => `<button data-unit="${esc(u.mac)}" class="${u.mac === routerSel ? "on" : ""}">
       ${u.role === "router" ? "◎" : "◉"} ${esc(u.alias || u.model || u.mac)}${u.reachable ? "" : ' <span class="bad small">●</span>'}</button>`).join("")
-    + `<button data-unit="pc" class="${routerSel === "pc" ? "on" : ""}">🖥 This PC</button>`;
+    + `<button data-unit="pc" class="${routerSel === "pc" ? "on" : ""}">🖥 This PC</button>`
+    + `<button data-unit="probes" class="${routerSel === "probes" ? "on" : ""}">📡 Probes</button>`;
   if (routerSel === "pc") return renderHostPc();
+  if (routerSel === "probes") return renderProbes();
   return renderUnit(routerSel);
 }
 
 async function renderUnit(mac) {
   const [d, host] = await Promise.all([api(`/api/units/${encodeURIComponent(mac)}/detail`), api("/api/hostpc").catch(() => ({ scan: [] }))]);
+  const plan = d.unit.role === "router" ? await api("/api/channels").catch(() => null) : null;
   const u = d.unit, id = d.identity || {};
   const air = (host.scan || []).filter((b) => b.own_unit === mac && b.util_pct != null);
   const unreachable = !u.reachable;
@@ -43,6 +46,7 @@ async function renderUnit(mac) {
     </div></div>
 
   ${systemHtml(d)}
+  ${backhaulHtml(d)}
 
   <div class="card"><h3>Radios and networks</h3>
     ${tbl(["Interface", "Network", "Band", "Channel", "Width", "Power", "Devices", "Traffic now", "Noise", "Tx failures", "Rx errors", "Temp"],
@@ -61,6 +65,8 @@ async function renderUnit(mac) {
         <td><span class="bar"><i class="${pctClass(b.util_pct, 50, 75)}" style="width:${Math.min(100, b.util_pct)}%"></i></span> ${esc(b.util_pct)}%</td>
         <td>${esc(b.stations ?? "")}</td><td class="${rssiClass(b.rssi)}">${esc(b.rssi)} dBm</td></tr>`))}` : ""}
   </div>
+
+  ${plan ? channelPlanHtml(plan) : ""}
 
   <div class="grid">
     <div class="card"><h3>Ports</h3>
@@ -94,6 +100,61 @@ async function renderUnit(mac) {
   <div class="card"><details><summary><b>Raw identity values</b> <span class="muted small">(as reported by the unit)</span></summary>
     <div class="table-scroll short"><table>${Object.entries(id).map(([k, v]) => `<tr><td class="mono">${esc(k)}</td><td class="mono wrap">${esc(v)}</td></tr>`).join("")}</table></div></details></div>`;
   drawSystemCharts(d);
+  drawBackhaul(d);
+}
+
+function backhaulHtml(d) {
+  const b = d.backhaul_traffic;
+  if (!b || !Object.keys(b.series || {}).length) return "";
+  const tot = Object.entries(b.totals_gb || {}).map(([k, v]) => `${esc(k)}: <b>${esc(v)} GB</b>`).join(" · ");
+  return `<div class="card"><h3>Backhaul traffic, last 24 h <span class="muted small">this unit's own link to the mesh, per band</span>
+      <button class="help" data-help="backhaul-traffic">?</button></h3>
+    <div id="bh-chart" class="chart-box"></div>
+    <p class="muted small">Total: ${tot}. Both directions added together. Units with hardware packet offload can leave some traffic out of these counters, so treat the numbers as a minimum.</p></div>`;
+}
+
+function drawBackhaul(d) {
+  const el = $("#bh-chart");
+  if (!el) return;
+  Charts.time(el, { series: d.backhaul_traffic.series, type: "line", unit: "Mbit/s", yMin: 0, height: 180,
+    empty: "Appears after a few polls." });
+}
+
+function channelPlanHtml(p) {
+  const r5 = (p.recommend || {})["5"] || {}, r24 = (p.recommend || {})["2.4"] || {};
+  const cur = p.current || {};
+  const busy = (v) => v != null ? `<span class="bar"><i class="${pctClass(v, 50, 75)}" style="width:${Math.min(100, v)}%"></i></span> ${esc(v)}%` : "–";
+  const radar = (p.radar || {}).incidents || [];
+  const five = tbl(["Block", "", "Strong neighbours", "All neighbours", "Neighbours busy", "Radar (30 d)", "Score"],
+    (p.five || []).map((f) => `<tr class="${f.block === r5.block ? "good-row" : ""}"><td><b>${esc(f.block)}</b>${f.current ? ' <span class="pill">now</span>' : ""}${f.block === r5.block ? ' <span class="pill good">best</span>' : ""}</td>
+      <td class="muted small">${esc(f.note)}</td><td class="${f.strong_neighbours >= 3 ? "warn" : ""}" title="${esc((f.neighbour_names || []).join(", "))}">${esc(f.strong_neighbours)}</td>
+      <td>${esc(f.neighbours)}</td><td>${busy(f.busy_pct)}${f.own_busy_pct != null ? ` <span class="muted small">yours ${esc(f.own_busy_pct)}%</span>` : ""}</td>
+      <td class="${f.radar_hits ? "bad" : ""}">${f.radar_hits ? esc(f.radar_hits) + "× · " + esc(ago(f.last_radar)) : "–"}</td><td class="muted">${esc(f.score)}</td></tr>`));
+  const two = tbl(["Channel", "Strong neighbours", "Overlapping neighbours", "Neighbours busy", "Score"],
+    (p.two4 || []).map((c) => `<tr><td><b>${esc(c.channel)}</b>${c.current ? ' <span class="pill">now</span>' : ""}${c.channel === r24.channel ? ' <span class="pill good">best</span>' : ""}</td>
+      <td class="${c.strong_neighbours >= 3 ? "warn" : ""}" title="${esc((c.neighbour_names || []).join(", "))}">${esc(c.strong_neighbours)}</td><td>${esc(c.neighbours)}</td>
+      <td>${busy(c.busy_pct)}${c.own_busy_pct != null ? ` <span class="muted small">yours ${esc(c.own_busy_pct)}%</span>` : ""}</td><td class="muted">${esc(c.score)}</td></tr>`));
+  const inc = radar.length ? tbl(["When", "Heard by", "Channel", "Moved to", "Devices dropped", "Fell to 2.4 GHz", "Still on 2.4 GHz"],
+    radar.slice().reverse().map((i) => `<tr><td>${esc(new Date(i.ts * 1000).toLocaleString())}</td><td>${esc(i.detected_by.join(", "))}</td>
+      <td>${esc(i.channels.join(", "))} <span class="muted small">(${esc(i.blocks.join(", "))})</span></td><td>${esc((i.moved_to || []).join(", ") || "–")}</td>
+      <td class="${i.devices_dropped >= 4 ? "warn" : ""}">${esc(i.devices_dropped)}</td>
+      <td>${(i.pushed_to_24 || []).map((m) => esc(m.name)).join(", ") || "–"}</td>
+      <td class="${(i.still_on_24 || []).length ? "bad" : ""}">${(i.still_on_24 || []).map((m) => esc(m.name)).join(", ") || "–"}</td></tr>`)) : `<p class="muted small">No radar detected in the last 30 days.</p>`;
+  const single = (p.radar || {}).single_detector;
+  return `<div class="card"><h3>Channel plan <span class="muted small">which channels to use, from the air survey and radar history</span>
+      <button class="help" data-help="channel-plan">?</button></h3>
+    <div class="kv kv-wide">
+      <div>5 GHz now</div><div>${cur["5"] ? `channel ${esc(cur["5"].channel)}${cur["5"].width ? `, ${esc(cur["5"].width)} MHz` : ""}` : "–"}</div>
+      <div>5 GHz advice</div><div class="${r5.change ? "warn" : "good"}">${esc(r5.text || "–")}</div>
+      <div>2.4 GHz now</div><div>${cur["2.4"] ? `channel ${esc(cur["2.4"].channel)}` : "–"}</div>
+      <div>2.4 GHz advice</div><div class="${r24.change ? "warn" : "good"}">${esc(r24.text || "–")}</div>
+      <div>Based on</div><div>${esc(p.access_points_heard)} access points heard by this PC (${esc(p.neighbours_heard)} neighbours), last survey ${esc(ago(p.last_scan))}</div>
+    </div>
+    <h4>5 GHz blocks (80 MHz)</h4>${five}
+    <h4>2.4 GHz channels</h4>${two}
+    <h4>Radar events</h4>${single ? `<p class="muted small">Every detection came from <b>${esc(single)}</b>. If no other unit ever hears it, it may be a false trigger near that unit.</p>` : ""}${inc}
+    <p class="muted small">Neighbours are counted from what this PC's Wi-Fi card hears, so they reflect where this PC is. "Strong" means louder than -70 dBm.
+      Change channels on the main router (Wireless → General); the nodes follow it.</p></div>`;
 }
 
 function wifiLabel(gen, nss) {
@@ -144,7 +205,7 @@ function settingsHtml(s) {
 }
 
 async function renderHostPc() {
-  const h = await api("/api/hostpc");
+  const [h, plan] = await Promise.all([api("/api/hostpc"), api("/api/channels").catch(() => null)]);
   const l = h.link;
   const bands = {};
   (h.scan || []).forEach((b) => { const k = `${b.band} GHz ch ${b.channel}`; (bands[k] ||= { own: 0, other: 0, util: null }); b.own_unit ? bands[k].own++ : bands[k].other++;
@@ -162,6 +223,7 @@ async function renderHostPc() {
       <td class="${pctClass(a.bcast_pps, 30, 100)}">${esc(a.bcast_pps)} /s</td><td class="${pctClass(a.mcast_pps, 50, 150)}">${esc(a.mcast_pps)} /s</td>
       <td>${esc(a.ucast_pps)} /s</td><td>${esc(a.discards)}</td><td class="${a.errors ? "bad" : ""}">${esc(a.errors)}</td></tr>`))}
     <p class="muted small">Packets per second received over the last minute. A quiet home network is under ~30 broadcast/s; hundreds point at a flooding device.</p></div>
+  ${plan ? channelPlanHtml(plan) : ""}
   <div class="card"><h3>Channels in use</h3>
     ${tbl(["Channel", "Your networks", "Neighbours", "Busiest report"], Object.entries(bands).sort().map(([k, v]) => `<tr><td>${esc(k)}</td><td>${v.own}</td><td class="${v.other >= 3 ? "warn" : ""}">${v.other}</td>
       <td>${v.util != null ? `<span class="bar"><i class="${pctClass(v.util, 50, 75)}" style="width:${v.util}%"></i></span> ${v.util}%` : "–"}</td></tr>`))}</div>
@@ -174,8 +236,91 @@ async function renderHostPc() {
     <p class="muted small">"Busy" is the access point's own measurement of how much of the time its channel is in use (BSS Load); not every access point reports it.</p></div>`;
 }
 
+// ---------------------------------------------------------------- ESP32 probes
+const fmtBytes = (b) => b == null ? "" : b >= 1e9 ? (b / 1e9).toFixed(1) + " GB" : b >= 1e6 ? (b / 1e6).toFixed(1) + " MB" : b >= 1e3 ? Math.round(b / 1e3) + " kB" : b + " B";
+const probePairing = {};
+
+async function renderProbes() {
+  const [list, st] = await Promise.all([api("/api/probes"), api("/api/status")]);
+  const ps = st.probes || {};
+  $("#router-body").innerHTML = `
+  <div class="card"><h3>ESP32 probes <span class="muted small">radio sensors placed around the house</span> <button class="help" data-help="probes">?</button></h3>
+    <p class="muted small">Probes announce themselves on the network and MeshLens finds them by itself.
+      ${ps.listening ? "Listening for announcements." : `<span class="warn">${esc(ps.error || "Not listening for announcements yet.")}</span>`}
+      If one doesn't appear, enter its address (shown on the probe under SETUP → ABOUT).</p>
+    <form id="probe-add" class="inline"><input id="probe-ip" placeholder="Probe address, e.g. 192.168.1.50" inputmode="decimal">
+      <button>Look for it</button> <span id="probe-add-msg" class="small"></span></form></div>
+  ${list.length ? list.map(probeCard).join("") : `<div class="card"><p class="muted">No probes found yet. Switch one on and connect it to your Wi-Fi (on the probe: SETUP → WI-FI).</p></div>`}`;
+}
+
+function probeCard(p) {
+  const l = p.link || {}, env = p.env || {};
+  const state = !p.adopted ? '<span class="pill warn">not paired</span>' : p.paired ? '<span class="pill good">paired</span>' : '<span class="pill bad">paired elsewhere</span>';
+  const actions = !p.adopted
+    ? (probePairing[p.id] ? `<form class="inline" data-probe-confirm="${esc(p.id)}"><input name="code" placeholder="6-digit code on the probe" maxlength="6" inputmode="numeric" autocomplete="off">
+        <button>Confirm</button></form> <span class="muted small">The code stays on the probe's screen for 5 minutes.</span>`
+       : `<button data-probe-action="pair" data-probe="${esc(p.id)}">Pair</button> <span class="muted small">Shows a code on the probe's screen.</span>`)
+    : p.paired ? `<form class="inline" data-probe-place="${esc(p.id)}"><input name="room" placeholder="Room" value="${esc(p.room || "")}" maxlength="39">
+        <input name="spot" placeholder="Spot (optional)" value="${esc(p.spot || "")}" maxlength="39"><button>Save room</button></form>`
+    : `<span class="muted small">It is paired with another MeshLens. On the probe: SETUP → PROBE → Forget, then pair it here.</span>`;
+  const units = p.units_heard || [];
+  const temp = env.temp_c != null ? `${Number(env.temp_c).toFixed(1)} °C` : "–";
+  return `<div class="card"><h3>${esc(p.room || p.id)} ${p.room ? `<span class="muted small">${esc(p.id)}</span>` : ""} ${state}
+      <span class="${p.online ? "good" : "muted"} small">${p.online ? "● online" : "○ last heard " + esc(ago(p.last_seen))}</span></h3>
+    <div class="kv kv-wide">
+      <div>Probe</div><div>${esc(p.chip || "ESP32")} · firmware ${esc(p.firmware || "?")} · ${esc(p.ip || "")}${p.mode ? ` · radio mode ${esc(p.mode)}` : ""}</div>
+      <div>Its Wi-Fi</div><div>${l.connected ? `${esc(l.ssid)} on ${esc(l.band)} GHz ch ${esc(l.channel)}, <span class="${rssiClass(l.rssi)}">${esc(l.rssi)} dBm</span>` : "–"}</div>
+      <div>Environment</div><div>${temp}${env.rh != null ? ` · ${esc(Math.round(env.rh))}% RH` : ""}${env.battery_v != null ? ` · battery ${esc(env.battery_v)} V${env.battery_v > 4.3 ? " (on USB)" : ""}` : ""}</div>
+      <div>Last scan</div><div>${esc(ago(p.last_scan))} · ${esc(p.aps_heard)} access points heard (${esc(p.neighbours["2.4"])} neighbours on 2.4 GHz, ${esc(p.neighbours["5"])} on 5 GHz)</div>
+      ${p.last_error ? `<div>Problem</div><div class="warn">${esc(p.last_error)}</div>` : ""}
+    </div>
+    <p>${actions} · <button class="linkish" data-probe-action="forget" data-probe="${esc(p.id)}">Forget</button></p>
+    <div class="grid">
+      <div><h4>Your mesh as heard here</h4>${tbl(["Unit", "Band", "Ch", "Signal", "PMF"], units.map((u) => `<tr><td>${esc(u.unit)}</td><td>${esc(u.band)} GHz</td>
+        <td>${esc(u.channel ?? "")}</td><td class="${rssiClass(u.rssi)}">${esc(u.rssi)} dBm</td><td>${esc(u.pmf || "")}</td></tr>`))}
+        <p class="muted small">The strongest unit here is the one devices in this spot should use. PMF is read from each unit's beacons.</p></div>
+      <div><h4>Busiest devices on its channel (last hour)</h4>${tbl(["Device", "Via", "Data", "Signal"], (p.top_talkers || []).map((t) => `<tr ${devicesByMac[t.mac] ? `data-mac="${esc(t.mac)}" class="clickrow"` : ""}>
+        <td>${esc(t.name)}</td><td>${esc(t.via || "")}</td><td>${esc(fmtBytes(t.bytes))}</td><td class="${rssiClass(t.rssi || null)}">${t.rssi ? esc(t.rssi) + " dBm" : ""}</td></tr>`), "clickable")}
+        <p class="muted small">Heard by the probe's air monitor on the channel it is joined to; payloads are encrypted and never read.</p></div>
+    </div>
+    ${(p.alerts || []).length ? `<h4>Alerts (7 days)</h4>${tbl(["When", "Severity", "What"], p.alerts.map((a) => `<tr><td>${esc(new Date(a.ts * 1000).toLocaleString())}</td>
+      <td class="${a.severity === "danger" ? "bad" : a.severity === "warn" ? "warn" : "muted"}">${esc(a.severity)}</td><td class="wrap">${esc(a.text)}</td></tr>`))}` : ""}
+  </div>`;
+}
+
+document.addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-probe-action]");
+  if (!b) return;
+  e.preventDefault();
+  const id = b.dataset.probe, act = b.dataset.probeAction;
+  if (act === "forget" && !confirm(`Forget probe ${id} in MeshLens? (To unpair the probe itself, use Forget on its screen.)`)) return;
+  try {
+    await post(`/api/probes/${encodeURIComponent(id)}/${act}`, {});
+    if (act === "pair") probePairing[id] = true;
+  } catch (err) { alert(err.message); }
+  renderProbes();
+});
+document.addEventListener("submit", async (e) => {
+  const f = e.target;
+  if (f.id === "probe-add") {
+    e.preventDefault();
+    $("#probe-add-msg").textContent = "Looking…";
+    try { const r = await post("/api/probes/add", { ip: $("#probe-ip").value }); $("#probe-add-msg").textContent = `Found ${r.id}.`; renderProbes(); }
+    catch (err) { $("#probe-add-msg").textContent = err.message; }
+  } else if (f.dataset.probeConfirm) {
+    e.preventDefault();
+    const id = f.dataset.probeConfirm;
+    try { await post(`/api/probes/${encodeURIComponent(id)}/confirm`, { code: f.code.value.trim() }); delete probePairing[id]; renderProbes(); }
+    catch (err) { alert(err.message); }
+  } else if (f.dataset.probePlace) {
+    e.preventDefault();
+    try { await post(`/api/probes/${encodeURIComponent(f.dataset.probePlace)}/placement`, { room: f.room.value, spot: f.spot.value }); renderProbes(); }
+    catch (err) { alert(err.message); }
+  }
+});
+
 LOADERS.router = () => loadRouter();
 document.addEventListener("click", (e) => {
-  const b = e.target.closest("[data-unit]");
+  const b = e.target.closest("button[data-unit]");
   if (b) { routerSel = b.dataset.unit; loadRouter(); }
 });

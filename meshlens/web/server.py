@@ -60,6 +60,12 @@ def build_app(engine: Engine, auth: Auth) -> web.Application:
     r.add_get("/api/analysis", analysis_get)
     r.add_get("/api/trends", trends)
     r.add_get("/api/topology", topology_get)
+    r.add_get("/api/channels", channels_get)
+    r.add_get("/api/issues/hidden", hidden_get)
+    r.add_get("/api/probes", probes_get)
+    r.add_post("/api/probes/add", probe_add)
+    r.add_post("/api/probes/{pid}/{action:(pair|confirm|placement|forget)}", probe_action)
+    r.add_post("/api/issues/hide", hide_post)
     r.add_get("/api/monitor/live", monitor_live)
     r.add_get("/api/monitor/history", monitor_history)
     r.add_post("/api/speedtest", speedtest_run)
@@ -297,6 +303,78 @@ async def trends(request: web.Request) -> web.Response:
 
 
 # ---------------------------------------------------------------- topology, monitors, tests, discovery
+
+async def probes_get(request: web.Request) -> web.Response:
+    from ..collectors.probes import view
+    return web.json_response(await asyncio.to_thread(view, db.units(), db.devices()))
+
+
+async def probe_add(request: web.Request) -> web.Response:
+    """Ask an address directly (when the probe's announcements don't reach this PC)."""
+    import ipaddress
+    body = await request.json()
+    try:
+        ip = str(ipaddress.ip_address(str(body.get("ip") or "").strip()))
+    except ValueError:
+        return web.json_response({"error": "enter the probe's IP address (shown on its SETUP → ABOUT page)"}, status=400)
+    if not ipaddress.ip_address(ip).is_private:
+        return web.json_response({"error": "probes are on your home network: use a local address"}, status=400)
+    eng = request.app[ENGINE]
+
+    def go():
+        st, info = eng.probes.http("GET", ip, "/api/info", None, None, 5)
+        if st != 200 or not info.get("probe"):
+            return {"ok": False, "error": f"no MeshLens probe answered at {ip}"}
+        eng.probes.seen({"id": info["probe"], "ip": ip, "chip": info.get("chip"), "bands": ",".join(info.get("bands") or []),
+                         "firmware": info.get("firmware"), "adopted": info.get("adopted")})
+        eng.probes.poll()
+        return {"ok": True, "id": info["probe"]}
+    try:
+        res = await asyncio.to_thread(go)
+    except OSError as e:
+        res = {"ok": False, "error": f"no answer from {ip}: {e}"}
+    return web.json_response(res, status=200 if res["ok"] else 400)
+
+
+async def probe_action(request: web.Request) -> web.Response:
+    pid, action = request.match_info["pid"], request.match_info["action"]
+    eng = request.app[ENGINE]
+    body = await request.json()
+    fn = {"pair": lambda: eng.probes.start_pairing(pid),
+          "confirm": lambda: eng.probes.confirm_pairing(pid, str(body.get("code") or "").strip()),
+          "placement": lambda: eng.probes.set_placement(pid, str(body.get("room") or ""), str(body.get("spot") or "")),
+          "forget": lambda: eng.probes.forget(pid)}[action]
+    try:
+        res = await asyncio.to_thread(fn)
+    except KeyError:
+        return web.json_response({"error": "unknown probe"}, status=404)
+    except OSError as e:
+        res = {"ok": False, "error": f"the probe didn't answer: {e}"}
+    if res.get("ok"):
+        with eng._lock:
+            eng._analysis.clear()
+            eng._channels = None
+    return web.json_response(res, status=200 if res.get("ok") else 400)
+
+
+async def hidden_get(request: web.Request) -> web.Response:
+    return web.json_response(db.hidden_issues())
+
+
+async def hide_post(request: web.Request) -> web.Response:
+    """Hide (or show again) one issue for one subject: {"rule", "subject", "hidden": bool, "title"}."""
+    body = await request.json()
+    rule, subject = str(body.get("rule") or ""), str(body.get("subject") or "")
+    if not rule or not subject:
+        return web.json_response({"error": "rule and subject are required"}, status=400)
+    title = str(body.get("title") or "")[:200] or None
+    await asyncio.to_thread(request.app[ENGINE].set_issue_hidden, rule, subject, bool(body.get("hidden", True)), title)
+    return web.json_response({"ok": True})
+
+
+async def channels_get(request: web.Request) -> web.Response:
+    return web.json_response(await asyncio.to_thread(request.app[ENGINE].channels))
+
 
 async def topology_get(request: web.Request) -> web.Response:
     return web.json_response(await asyncio.to_thread(request.app[ENGINE].topology))

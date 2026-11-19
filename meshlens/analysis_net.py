@@ -34,6 +34,10 @@ def _agg(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "label": rows[-1].get("label") if rows else None, "kind": rows[-1].get("kind") if rows else None}
 
 
+def _ago_h(s: float) -> str:
+    return f"{s / 3600:.0f} hours" if s < 172800 else f"{s / 86400:.0f} days"
+
+
 def _hm(ts: float) -> str:
     return time.strftime("%d %b %H:%M", time.localtime(ts))
 
@@ -161,6 +165,49 @@ def net_issues(net: dict[str, Any], devs: dict[str, dict[str, Any]], now: float)
                 ["Check the PC's path on the Topology tab: a powerline link shows its speed on the map.",
                  "A direct cable to the router (or a mesh unit with a wired backhaul) removes the bottleneck.",
                  "Treat speed tests from this PC as a test of its path, and the router test as the line."]))
+    rank = {"A": 0, "B": 1, "C": 2, "D": 3, "F": 4}
+    pcg = [x for x in pc_speeds if x.get("down_mbps") is not None]
+    if len(pcg) >= 5:
+        # Find the most recent big step in this PC's results (speed and bufferbloat together).
+        for k in range(len(pcg) - 1, 3, -1):
+            before, after = pcg[max(0, k - 8):k], pcg[k:]
+            bd = statistics.median(x["down_mbps"] for x in before)
+            ad = statistics.median(x["down_mbps"] for x in after)
+            bg = [rank[x["grade"]] for x in before if x.get("grade") in rank]
+            ag = [rank[x["grade"]] for x in after if x.get("grade") in rank]
+            gstep = (statistics.median(ag) - statistics.median(bg)) if bg and ag else 0
+            ratio = ad / bd if bd else 1
+            big = (ratio >= 2.5 or ratio <= 0.4) and (abs(gstep) >= 2 or len(after) >= 3)
+            if not big:
+                continue
+            better = ratio > 1
+            bup = statistics.median(x["up_loaded_ms"] for x in before if x.get("up_loaded_ms") is not None) if any(
+                x.get("up_loaded_ms") is not None for x in before) else None
+            aup = statistics.median(x["up_loaded_ms"] for x in after if x.get("up_loaded_ms") is not None) if any(
+                x.get("up_loaded_ms") is not None for x in after) else None
+            gl = lambda v: "ABCDF"[round(v)] if v is not None else "?"
+            ev = (f"Before {_hm(pcg[k]['ts'])} ({len(before)} tests): typically {bd:.0f} Mbit/s down"
+                  + (f", {bup:.0f} ms during upload" if bup is not None else "")
+                  + (f", grade {gl(statistics.median(bg))}" if bg else "")
+                  + f". Since ({len(after)} test{'s' if len(after) > 1 else ''}): {ad:.0f} Mbit/s"
+                  + (f", {aup:.0f} ms during upload" if aup is not None else "")
+                  + (f", grade {gl(statistics.median(ag))}" if ag else "") + ".")
+            cause = ("Speed and latency under load from this PC changed together in one step, so something on the PC's own "
+                     "path changed (cabling, a powerline adapter, a Wi-Fi bridge, a switch port), not the internet line. ")
+            if better and gstep <= -2:
+                cause += ("The bufferbloat seen before came from that old path: powerline adapters and slow links queue "
+                          "packets when they are full, which shows up as lag under load even though the line itself is fine.")
+            elif not better:
+                cause += "The new path is slower or queues more; other devices on the same path are affected the same way."
+            out.append(_issue(
+                "speed_path_changed", "info" if better else "medium", "network", "speed_path",
+                "Speed tests from this PC " + ("improved sharply" if better else "got much worse") + f" at {_hm(pcg[k]['ts'])}",
+                ev + (" Only one test since: the next few will confirm it." if len(after) == 1 else ""), cause,
+                (["Older bufferbloat issues from this PC described the old path; judge the line by the router's own test."]
+                 if better else ["Check what changed on the PC's path around that time (Topology tab, powerline rates)."]),
+                pcg[k]["ts"], pcg[-1]["ts"]))
+            break
+
     for s in (net.get("speeds") or [])[-1:]:
         if s.get("error"):
             out.append(_issue("speedtest_failed", "low", "network", "speedtest", "The last speed test failed",
@@ -231,6 +278,39 @@ def net_issues(net: dict[str, Any], devs: dict[str, dict[str, Any]], now: float)
     # ------------------------------------------------ unit CPU, memory, temperature, connections, storage, restarts
     us = net.get("unit_samples") or []
     names = net.get("unit_names") or {}
+    # Restarts of several units within 45 minutes are one event (a firmware update or scheduled reboot).
+    all_restarts: list[tuple[float, str]] = []
+    per_u: dict[str, list[tuple[float, int]]] = defaultdict(list)
+    for r in us:
+        if r.get("uptime_s") is not None:
+            per_u[r["unit"]].append((r["ts"], r["uptime_s"]))
+    for unit, ups in per_u.items():
+        ups.sort()
+        all_restarts += [(t, unit) for (t0, u0), (t, u) in zip(ups, ups[1:]) if u < u0]
+    all_restarts.sort()
+    grouped: set[tuple[float, str]] = set()
+    i = 0
+    while i < len(all_restarts):
+        j = i
+        while j + 1 < len(all_restarts) and all_restarts[j + 1][0] - all_restarts[i][0] <= 2700:
+            j += 1
+        grp = all_restarts[i:j + 1]
+        if len({u for _, u in grp}) >= 3:
+            grouped |= set(grp)
+            t0, t1 = grp[0][0], grp[-1][0]
+            night = all(0 <= time.localtime(t).tm_hour < 6 for t, _ in grp)
+            out.append(_issue(
+                "mesh_restart", "info" if night else "medium", "network", f"mesh-restart-{int(t0)}",
+                f"{len({u for _, u in grp})} mesh units restarted together",
+                f"Between {_hm(t0)} and {_hm(t1)}: " + ", ".join(f"{names.get(u, u)} {time.strftime('%H:%M', time.localtime(t))}" for t, u in grp) + ".",
+                ("Every unit restarting within the same half hour in the night is the mesh's own housekeeping: an automatic "
+                 "firmware update or a scheduled reboot, not a fault." if night else
+                 "Every unit restarting together points at the main router (a firmware update, a settings change that "
+                 "restarts the mesh) or a power cut."),
+                (["Nothing to do if it was a firmware update; check Administration → Firmware Upgrade for the new version."]
+                 if night else ["Check whether someone changed settings or updated firmware then, and whether the power dipped."]),
+                t0, t1, count=len(grp)))
+        i = j + 1
     if acfg and us:
         per: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for r in us:
@@ -282,7 +362,7 @@ def net_issues(net: dict[str, Any], devs: dict[str, dict[str, Any]], now: float)
                         f"{label}: {last[k]}% used.", "When it fills, logs and settings can't be written.",
                         ["Restart the unit (clears /tmp); if /jffs stays full, check add-on scripts."]))
             ups = [(r["ts"], r["uptime_s"]) for r in rs if r.get("uptime_s") is not None]
-            restarts = [t for (t0, u0), (t, u) in zip(ups, ups[1:]) if u < u0]
+            restarts = [t for (t0, u0), (t, u) in zip(ups, ups[1:]) if u < u0 and (t, unit) not in grouped]
             if restarts:
                 out.append(_issue(
                     "unit_restarted", "medium" if len(restarts) > 1 else "info", "unit", unit,
@@ -299,23 +379,298 @@ def net_issues(net: dict[str, Any], devs: dict[str, dict[str, Any]], now: float)
     for e in uev:
         by_kind[e["kind"]].append(e)
     radar = sorted(by_kind.get("radar", []), key=lambda e: e["ts"])
+    plan = net.get("channel_plan") or {}
+    rec5 = (plan.get("recommend") or {}).get("5") or {}
     if radar:
-        moves = {e["unit"]: e for e in by_kind.get("channel_change", [])}
+        incs = [i for i in ((plan.get("radar") or {}).get("incidents") or []) if i["ts"] >= radar[0]["ts"] - 60]
         lines = []
-        for e in radar[-5:]:
-            mv = next((c for c in by_kind.get("channel_change", []) if c["unit"] == e["unit"] and 0 <= c["ts"] - e["ts"] < 120), None)
-            lines.append(f"{_hm(e['ts'])} {names.get(e['unit'], e['unit'])} on channel {e['detail'].get('channel')}"
-                         + (f" → moved to {mv['detail'].get('to_channel')}" if mv else ""))
+        if incs:
+            for i in incs[-5:]:
+                bits = [f"{_hm(i['ts'])} {', '.join(i['detected_by'])} heard radar on channel {', '.join(map(str, i['channels']))}"]
+                if i.get("moved_to"):
+                    bits.append(f"5 GHz moved to channel {i['moved_to'][0]}")
+                if i.get("devices_dropped"):
+                    bits.append(f"{i['devices_dropped']} devices dropped")
+                if i.get("pushed_to_24"):
+                    stuck = i.get("still_on_24") or []
+                    bits.append(f"{len(i['pushed_to_24'])} fell back to 2.4 GHz"
+                                + (f" ({len(stuck)} still there: {', '.join(m['name'] for m in stuck[:4])})" if stuck else ""))
+                lines.append(", ".join(bits))
+        else:
+            for e in radar[-5:]:
+                mv = next((c for c in by_kind.get("channel_change", []) if c["unit"] == e["unit"] and 0 <= c["ts"] - e["ts"] < 120), None)
+                lines.append(f"{_hm(e['ts'])} {names.get(e['unit'], e['unit'])} on channel {e['detail'].get('channel')}"
+                             + (f" → moved to {mv['detail'].get('to_channel')}" if mv else ""))
+        single = (plan.get("radar") or {}).get("single_detector")
+        stuck_any = any(i.get("still_on_24") for i in incs)
+        cause = ("5 GHz channels 52-144 are shared with weather and other radar (DFS channels). When a unit detects radar it must "
+                 "leave the channel at once and check the new one for a minute before using it, so every 5 GHz device on it drops "
+                 "or stalls, and a 5 GHz mesh backhaul moves too. Dual-band devices often reconnect on 2.4 GHz while 5 GHz is "
+                 "moving, and the mesh only steers them back up if their 2.4 GHz signal is very strong, so they can stay on the "
+                 "slower band for hours.")
+        if single:
+            cause += (f" Every detection came from {single}: if no other unit ever hears it, it may be a false trigger near "
+                      "that unit (some electronics produce radar-like pulses), but the channel has to be left either way.")
+        fixes = [rec5.get("text") if rec5.get("block") == "36-48" else
+                 "Set 5 GHz to a channel from 36-48 (no radar checks) in the ASUS app or web UI (Wireless → General → 5 GHz → "
+                 "Control channel), or untick 'Auto select channel including DFS channels', so radar can't knock it off.",
+                 "If the units' 5 GHz backhaul is also on a DFS channel, prefer 6 GHz or Ethernet backhaul where possible."]
+        if stuck_any:
+            fixes.append("Devices still on 2.4 GHz since the radar event: turn their Wi-Fi off and on to rejoin on 5 GHz.")
         out.append(_issue(
-            "radar_dfs", "medium", "network", "radar", f"Radar forced 5 GHz off its channel {len(radar)} time{'s' if len(radar) > 1 else ''}",
-            "; ".join(lines) + ".",
-            "5 GHz channels 52-144 are shared with weather and other radar (DFS channels). When a unit detects radar it must leave "
-            "the channel at once and check the new one for a minute before using it, so every 5 GHz device on it drops or "
-            "stalls, and a 5 GHz mesh backhaul moves too.",
-            ["Set 5 GHz to a channel from 36-48 (no radar checks) in the ASUS app or web UI (Wireless → General → 5 GHz → "
-             "Control channel), so radar can't knock it off.",
-             "If the units' 5 GHz backhaul is also on a DFS channel, prefer 6 GHz or Ethernet backhaul where possible."],
+            "radar_dfs", "high" if stuck_any or len(radar) >= 3 else "medium", "network", "radar",
+            f"Radar forced 5 GHz off its channel {len(radar)} time{'s' if len(radar) > 1 else ''}",
+            "; ".join(lines) + ".", cause, [f for f in fixes if f],
             radar[0]["ts"], radar[-1]["ts"], count=len(radar)))
+    r24 = (plan.get("recommend") or {}).get("2.4") or {}
+    if rec5.get("change") or r24.get("change"):
+        ev = []
+        for f in plan.get("five") or []:
+            if f.get("current") or f["block"] == rec5.get("block"):
+                ev.append(f"5 GHz {f['block']}{' (now)' if f.get('current') else ''}: {f['strong_neighbours']} strong / "
+                          f"{f['neighbours']} neighbours" + (f", neighbours busy {f['busy_pct']}%" if f['busy_pct'] is not None else '') + ", "
+                          f"radar {f['radar_hits']}×")
+        for c in plan.get("two4") or []:
+            if c.get("current") or c["channel"] == r24.get("channel"):
+                ev.append(f"2.4 GHz ch {c['channel']}{' (now)' if c.get('current') else ''}: {c['strong_neighbours']} strong / "
+                          f"{c['neighbours']} overlapping neighbours")
+        cur24 = ((plan.get("current") or {}).get("2.4") or {}).get("channel")
+        if cur24 and cur24 not in (1, 6, 11):
+            ev.append(f"2.4 GHz is on channel {cur24}, between the non-overlapping channels 1, 6 and 11")
+        out.append(_issue(
+            "channel_plan", "medium" if rec5.get("change") else "low", "network", "channel_plan",
+            "A better Wi-Fi channel is available",
+            "; ".join(ev) + ".",
+            "MeshLens scores each 5 GHz 80 MHz block and the 2.4 GHz channels 1, 6 and 11 from the air survey (how many "
+            "neighbouring networks this PC hears and how loud, how busy access points say the channel is) and the radar "
+            "history. Fewer strong neighbours and no radar means more airtime and fewer forced channel changes.",
+            [x["text"] for x in (rec5, r24) if x.get("change")]
+            + ["Channels are set on the main router (Wireless → General); the nodes follow it. Router → Channel plan shows the full table."]))
+
+    # Dual-band devices left on 2.4 GHz (often after a radar event or a 5 GHz restart).
+    hist = net.get("band_history") or {}
+    unit_macs: set[str] = set()
+    for u in net.get("units") or []:
+        unit_macs |= {u["mac"], *(u.get("macs") or [])}
+    stuck_min = getattr(net.get("analysis_cfg"), "stuck_24_minutes", 60)
+    trig = sorted([e for e in uev if e["kind"] in ("radar", "channel_change", "channel_replan", "unit_reboot")], key=lambda e: e["ts"])
+    for s in net.get("latest_stations") or []:
+        h = hist.get(s["mac"])
+        if (s.get("band") != "2.4" or s["mac"] in unit_macs or not h or now - s["ts"] > 900
+                or h["hi"] < 20 or not h.get("last_hi") or now - h["last_hi"] < stuck_min * 60):
+            continue
+        d = devs.get(s["mac"]) or {}
+        name = display_name(d, s["mac"])
+        why = next((e for e in trig if -60 <= h["last_hi"] - e["ts"] <= 420), None)
+        out.append(_issue(
+            "stuck_on_24", "medium", "device", s["mac"], f"{name} is stuck on 2.4 GHz",
+            f"It used 5/6 GHz until {_hm(h['last_hi'])} (typical signal there {h['hi_rssi']} dBm) and has been on 2.4 GHz since, "
+            f"now at {s.get('rssi')} dBm via {names.get(s.get('unit'), s.get('unit'))}."
+            + (f" It moved at the same time as {'radar' if why['kind'] == 'radar' else why['kind'].replace('_', ' ')} on "
+               f"{names.get(why['unit'], why['unit'])} ({_hm(why['ts'])})." if why else ""),
+            "The device dropped off 5 GHz and rejoined on 2.4 GHz. 2.4 GHz is slower and busier, so streaming and downloads "
+            "suffer. The mesh's band steering only pushes a 2.4 GHz device back to 5 GHz when its 2.4 GHz signal is very "
+            "strong (Smart Connect rule), so a device a room or two away can stay on 2.4 GHz indefinitely.",
+            ["Turn the device's Wi-Fi off and on (or restart it) so it rejoins on 5 GHz.",
+             "Stop the trigger: keep 5 GHz on channels 36-48 so radar can't force it off (see Channel plan).",
+             "In Wireless → Smart Connect Rule, check the 2.4 GHz → 5 GHz steering condition: if it needs an RSSI above "
+             "about -52 dBm, lowering it to about -68 dBm lets devices like this move back up. Change it in small steps.",
+             "For a TV or streamer that never moves, a cable or binding it to the nearest node (AiMesh → client) keeps it put."],
+            h["last_hi"], now))
+
+    # A network loop behind a powerline adapter (seen by the devolo poll).
+    loops = sorted(by_kind.get("l2_loop", []), key=lambda e: e["ts"])
+    if loops:
+        per_ad: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for e in loops:
+            per_ad[e["unit"]].append(e)
+        router_pings = [p for p in net.get("pings") or [] if (p.get("label") or "").lower() == "router"]
+
+        def loss(rs: list[dict[str, Any]]) -> float | None:
+            sent = sum(r["sent"] or 0 for r in rs)
+            return 100 * sum(r["lost"] or 0 for r in rs) / sent if sent else None
+        for adapter, es in per_ad.items():
+            last = es[-1]["detail"]
+            seen = {int(e["ts"] // 60) for e in es}
+            near = [p for p in router_pings if any(abs(int(p["ts"] // 60) - m) <= 3 for m in seen)]
+            away = [p for p in router_pings if all(abs(int(p["ts"] // 60) - m) > 3 for m in seen)]
+            ln, la = loss(near), loss(away)
+            strong = any(e["detail"].get("router_macs") or e["detail"].get("wifi_clients") for e in es)
+            ev = [f"Seen {len(es)} time{'s' if len(es) > 1 else ''} behind {last.get('adapter_name')}, last {_hm(es[-1]['ts'])}"]
+            if any(e["detail"].get("router_macs") for e in es):
+                ev.append("the main router's own address appeared behind it")
+            wc = max((e["detail"] for e in es), key=lambda d: len(d.get("wifi_clients") or []))
+            if wc.get("wifi_clients"):
+                ev.append(f"{len(wc['wifi_clients'])} Wi-Fi devices of {', '.join(wc.get('wifi_client_units') or [])} appeared behind it")
+            for n in last.get("nodes") or []:
+                ev.append(f"{n['name']} is behind it and also linked over Wi-Fi ({', '.join(n['wifi_backhaul'])})")
+            if ln is not None and la is not None:
+                ev.append(f"ping loss to the router {ln:.1f}% around those times vs {la:.1f}% otherwise")
+            out.append(_issue(
+                "network_loop", "high" if strong else "medium", "network", f"loop-{adapter}",
+                f"Possible network loop behind {last.get('adapter_name')}" if strong else
+                f"A mesh node has two paths: Wi-Fi and {last.get('adapter_name')}",
+                "; ".join(ev) + ".",
+                "The wired devices behind this powerline adapter already reach the router through the powerline. If a mesh node "
+                "(or a wireless bridge) behind it is also linked to the mesh over Wi-Fi, there are two paths and traffic can go "
+                "round in a circle. Switches then keep changing their minds about where each device is, so devices drop, "
+                "pings are lost and broadcasts multiply. Addresses that belong on the router side showing up behind this adapter "
+                "are the tell-tale sign.",
+                ["Keep one path: either unplug the cable from the node/bridge to the switch, or unplug the powerline adapter "
+                 "from that switch, so the wired devices reach the router one way only.",
+                 "If the node should use the powerline as its backhaul, plug it into its WAN/uplink port and set AiMesh "
+                 "'Ethernet backhaul' so it stops using Wi-Fi.",
+                 "Check for two cables between the same pair of switches as well."],
+                es[0]["ts"], es[-1]["ts"], count=len(es)))
+
+    # Two units with the same name make every report ambiguous.
+    same: dict[str, list[str]] = defaultdict(list)
+    for u in net.get("units") or []:
+        if u.get("alias") and u.get("role") != "router":
+            same[u["alias"].strip().lower()].append(u["alias"])
+    for k, v in same.items():
+        if len(v) > 1:
+            out.append(_issue(
+                "duplicate_unit_name", "low", "network", f"dup-{k}", f"{len(v)} mesh units are called '{v[0]}'",
+                f"{len(v)} units share the name '{v[0]}'.", "Reports, events and the map can't tell them apart.",
+                ["Rename one in the ASUS app (AiMesh → the node → location name)."]))
+
+    # One address answered by two network adapters (a device on cable *and* Wi-Fi, or two devices fighting over it).
+    devl = [d for d in net.get("devices") or [] if d.get("ip") and d.get("last_seen") and now - d["last_seen"] < 1800]
+    by_ip: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for d in devl:
+        by_ip[d["ip"]].append(d)
+    for ip, ds in by_ip.items():
+        if len(ds) < 2:
+            continue
+        wired = [d for d in ds if d.get("wired")]
+        wifi = [d for d in ds if not d.get("wired")]
+        nm = lambda d: display_name(d, d["mac"])
+        # Same host name on both: one machine with two adapters (a stored address can be stale, so a mere shared
+        # address between differently named devices is not reported).
+        same_host = len({(d.get("name") or "").lower() for d in ds}) == 1 and ds[0].get("name")
+        if wired and wifi and same_host:
+            out.append(_issue(
+                "dual_homed", "high", "device", wired[0]["mac"], f"{nm(wired[0])} is on cable and Wi-Fi with the same address",
+                f"{ip} is used by {nm(wired[0])} on a cable ({wired[0]['mac']}) and by "
+                + ", ".join(f"{nm(d)} on Wi-Fi ({d['mac']}" + (f", {names.get(d.get('unit'), d.get('unit'))}" if d.get('unit') else "") + ")" for d in wifi)
+                + "; both seen in the last 30 minutes.",
+                "Two network adapters answering for one address make the rest of the network flip between them: replies go "
+                "out of one adapter and come back to the other, connections stall, and traffic takes the slow Wi-Fi path at "
+                "random. On a server everyone uses (a DNS server such as Pi-hole, a NAS, Home Assistant) the whole house "
+                "feels it.",
+                ["Turn off the Wi-Fi on the device if it has a cable (Raspberry Pi: add 'dtoverlay=disable-wifi' to "
+                 "/boot/config.txt, or 'nmcli radio wifi off').",
+                 "Or give the Wi-Fi side its own address if you want it as a backup."],
+                devices=[d["mac"] for d in ds]))
+
+    # Settings that should match on every unit.
+    sets = net.get("settings") or {}
+    for key, label in (("wl0_mfp", "2.4 GHz"), ("wl1_mfp", "5 GHz")):
+        vals = {u: v.get(key) for u, v in sets.items() if v.get(key) not in (None, "")}
+        if len(set(vals.values())) > 1:
+            meaning = {"0": "off", "1": "capable", "2": "required"}
+            out.append(_issue(
+                "pmf_mismatch", "medium", "network", f"pmf-{key}", f"Protected management frames differ between units ({label})",
+                "; ".join(f"{names.get(u, u)}: {meaning.get(v, v)}" for u, v in sorted(vals.items(), key=lambda x: names.get(x[0], x[0]))) + ".",
+                "PMF (part of WPA3) protects disconnect and roaming messages. If units disagree, a device moving between them "
+                "meets different rules: some refuse it ('try again later', status 30) or reject its saved key (status 53), so it "
+                "bounces back or drops. The values are each unit's own reading of the setting; nodes normally copy the router's.",
+                ["Set Protected Management Frames once on the main router (Wireless → Professional, per band: 'Capable' "
+                 "suits mixed devices) and apply; the nodes should pick it up when they sync.",
+                 "If a node keeps a different value, update its firmware or restart it so it re-syncs."]))
+            break
+    import re as _re
+    builds = {}
+    for u in net.get("units") or []:
+        m = _re.search(r"\.(\d{3})_(\d{5})", u.get("firmware") or "")
+        if m:
+            builds[u["mac"]] = (int(m.group(1)), int(m.group(2)), u.get("model") or "")
+    if len({b[1] for b in builds.values()}) > 1:
+        newest = max(b[1] for b in builds.values())
+        old = {u: b for u, b in builds.items() if b[1] < newest}
+        out.append(_issue(
+            "firmware_mismatch", "low", "network", "firmware-mix", "Mesh units run different firmware builds",
+            "; ".join(f"{names.get(u, u)} ({b[2]}): build {b[1]}" for u, b in sorted(builds.items(), key=lambda x: -x[1][1])) + ".",
+            "Each model has its own firmware, so the numbers needn't be identical, but ASUS releases them together and fixes "
+            "mesh problems (roaming, key handling, backhaul) in both. Units several builds apart are worth updating.",
+            [f"In the ASUS app or Administration → Firmware Upgrade, check for updates on "
+             + ", ".join(names.get(u, u) for u in old) + "; update all units, then restart the mesh once."]))
+
+    # Names the router guessed from the maker's prefix that belong to a different maker.
+    for d in net.get("devices") or []:
+        n, src, vendor = d.get("name") or "", d.get("name_src") or "", (d.get("vendor") or "").lower()
+        if (src.startswith("asus:") and "oui" in src.lower() and _re.match(r"(ZenWiFi|RT-|GT-|TUF|ROG|RP-)", n)
+                and vendor and "asus" not in vendor and d.get("last_seen") and now - d["last_seen"] < 86400):
+            out.append(_issue(
+                "suspect_name", "info", "device", d["mac"], f"'{n}' is probably not an ASUS device",
+                f"The router named it '{n}' from its address prefix, but that prefix belongs to {d.get('vendor')}.",
+                "The router's device database guesses names from the first half of the address and sometimes picks an ASUS "
+                "product name for another maker's chip (Espressif, used in many smart plugs and lights).",
+                ["Give it a proper name in Devices so its issues make sense."]))
+
+    # ------------------------------------------------ ESP32 probes
+    plist = net.get("probes") or []
+    pname = {p["id"]: (f"probe in {p['room']}" if p.get("room") else f"probe {p['id']}") for p in plist}
+    for p in plist:
+        name = pname[p["id"]]
+        if not p.get("adopted") and p.get("last_seen") and now - p["last_seen"] < 3600:
+            out.append(_issue(
+                "probe_new", "info", "network", f"probe-{p['id']}", f"New probe found: {p['id']}",
+                f"{p.get('chip') or 'ESP32'} probe at {p.get('ip')} (firmware {p.get('firmware') or '?'}), not paired yet.",
+                "A MeshLens probe announced itself on the network. Until it is paired, anyone on the network can read it "
+                "and MeshLens only uses what it shares openly.",
+                ["Router → Probes → Pair, then type the 6-digit code shown on the probe's screen, and set its room."]))
+        elif p.get("adopted") and not p.get("paired") and p.get("last_seen") and now - p["last_seen"] < 3600:
+            out.append(_issue(
+                "probe_unpaired", "medium", "network", f"probe-{p['id']}", f"MeshLens can't read {name}",
+                p.get("last_error") or "It is paired, but not with this MeshLens (or the token was lost).",
+                "The probe only answers the MeshLens it was paired with.",
+                ["On the probe: SETUP → PROBE → Forget. Then Router → Probes → Pair in MeshLens."]))
+        elif p.get("paired") and p.get("last_seen") and now - p["last_seen"] > 3 * 3600:
+            out.append(_issue(
+                "probe_offline", "low", "network", f"probe-{p['id']}", f"{name[0].upper() + name[1:]} hasn't reported for {_ago_h(now - p['last_seen'])}",
+                f"Last heard {_hm(p['last_seen'])} at {p.get('ip')}" + (f": {p['last_error']}" if p.get("last_error") else "") + ".",
+                "The probe is switched off, out of range, its battery is flat, or it has joined another network.",
+                ["Check it is powered and shows your network on SETUP → WI-FI; MeshLens picks it up again by itself."]))
+    alerts = sorted(by_kind.get("probe_alert", []), key=lambda e: e["ts"])
+    groups: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+    for e in alerts:
+        text = e["detail"].get("text") or "?"
+        groups[(e["unit"], _re.sub(r"\d+", "#", text)[:80])].append(e)
+    sev_map = {"danger": "high", "warn": "medium", "info": "info"}
+    for (pid, key), es in groups.items():
+        last = es[-1]["detail"]
+        sev = sev_map.get(last.get("severity"), "low")
+        out.append(_issue(
+            "probe_alert", sev, "network", f"{pid}|{key}", f"{pname.get(pid, pid)}: {last.get('text')}",
+            f"Reported {len(es)} time{'s' if len(es) > 1 else ''}, last {_hm(es[-1]['ts'])}.",
+            "The probe's air monitor watches the Wi-Fi channel for attacks and oddities: floods of disconnect frames, a "
+            "copy of your network name from another radio (evil twin), access points answering any name (Karma), beacon "
+            "floods, and Bluetooth trackers that stay near. Your own mesh steering devices away also sends disconnects, "
+            "so a few of those from your own units are normal.",
+            ["Open the probe's ALERTS tab for detail, or Router → Probes.",
+             "If it names one of your own units, it is usually band steering or roaming; if it names a stranger's radio "
+             "near you, note the time and where it was strongest."], es[0]["ts"], es[-1]["ts"], count=len(es)))
+    # PMF as actually broadcast by your own access points (the probes read it from beacons).
+    seen_pmf: dict[str, dict[str, str]] = defaultdict(dict)
+    for p in plist:
+        for b in ((p.get("air") or {}).get("beacons") or []):
+            ssid, bssid, pmf = b.get("ssid") or "", (b.get("bssid") or "").lower(), b.get("pmf")
+            if not ssid or not pmf or _re.fullmatch(r"[0-9A-F]{32}", ssid):
+                continue
+            from .hostpc import own_unit
+            u = own_unit(bssid, net.get("units") or [])
+            if u:
+                seen_pmf[ssid][names.get(u, u)] = pmf
+    for ssid, per in seen_pmf.items():
+        if len(set(per.values())) > 1:
+            out.append(_issue(
+                "pmf_mismatch_air", "medium", "network", f"pmf-air-{ssid}", f"Your units advertise '{ssid}' with different PMF",
+                "Heard by the probes in the units' beacons: " + "; ".join(f"{u}: {v}" for u, v in sorted(per.items())) + ".",
+                "Measured over the air, so this is what devices really see. A device roaming between these units meets "
+                "different security rules and can be refused or have its saved key rejected (status 30 / 53).",
+                ["Set Protected Management Frames once on the main router and re-apply so the nodes sync; update node firmware."]))
     for u in net.get("units") or []:
         for i in (u.get("info") or {}).get("ifaces") or []:
             ch = i.get("channel") or 0

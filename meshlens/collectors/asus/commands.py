@@ -62,6 +62,11 @@ def unit_script(main: bool, first_poll: bool, full: bool) -> str:
         'echo "@@@ mwctl_stat:$i"; mwctl dev $i stat 2>/dev/null; done; fi',
         'if which hostapd_cli >/dev/null 2>&1; then for i in $(ls /sys/class/net | grep -E "^(ra|rai|rax)[0-9]+$"); do '
         'case $i in ra0|rai0|rax0) continue;; esac; echo "@@@ sta_hostapd:$i"; hostapd_cli -i $i all_sta 2>/dev/null; done; fi',
+        # Older MediaTek firmware (no mwctl, no hostapd_cli, e.g. RT-AX57 Go): the driver's station table and
+        # radio counters per radio. Display-only iwpriv commands; nothing is changed or scanned.
+        'if ! which mwctl >/dev/null 2>&1 && ! which hostapd_cli >/dev/null 2>&1 && which iwpriv >/dev/null 2>&1; then '
+        'for i in $(nvram get wl_ifnames); do case $i in ra*) echo "@@@ mactable:$i"; iwpriv $i get_mac_table 2>/dev/null '
+        '| head -n 300; echo "@@@ iwpriv_stat:$i"; iwpriv $i stat 2>/dev/null | head -n 80;; esac; done; fi',
         # Qualcomm: stations per VAP.
         'if which wlanconfig >/dev/null 2>&1; then for i in $(ls /sys/class/net | grep -E "^ath[0-9]{3}$"); do '
         'echo "@@@ sta_wlanconfig:$i"; wlanconfig $i list sta 2>/dev/null; done; fi',

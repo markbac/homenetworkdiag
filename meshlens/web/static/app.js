@@ -104,17 +104,45 @@ function subjectLink(i) {
   return "";
 }
 
+function hideLabel(i) {
+  const who = i.scope === "device" ? "this device" : i.scope === "unit" ? "this unit" : "the network";
+  return i.hidden ? "Show this again" : `Hide this issue for ${who}`;
+}
+
 function renderIssue(i, open = false) {
   const when = i.from ? `<span class="muted small">${esc(fmtTime(i.from))}${i.to && i.to !== i.from ? " – " + esc(fmtTime(i.to)) : ""}</span>` : "";
-  return `<details class="issue ${esc(i.severity)}" ${open ? "open" : ""}>
-    <summary><span class="sev ${esc(i.severity)}">${esc(SEV[i.severity] || i.severity)}</span> <b>${esc(i.title)}</b> ${when}</summary>
+  return `<details class="issue ${esc(i.severity)}${i.hidden ? " hidden-issue" : ""}" ${open ? "open" : ""}>
+    <summary><span class="sev ${esc(i.severity)}">${esc(SEV[i.severity] || i.severity)}</span> <b>${esc(i.title)}</b> ${when}${i.hidden ? ' <span class="pill">hidden</span>' : ""}</summary>
     <div class="issue-body">
       <p><span class="lbl">Seen</span> ${esc(i.evidence)} ${subjectLink(i) ? "· " + subjectLink(i) : ""}</p>
       <p><span class="lbl">Why</span> ${esc(i.cause)}</p>
       ${i.fixes && i.fixes.length ? `<div><span class="lbl">Try</span><ol>${i.fixes.map((f) => `<li>${esc(f)}</li>`).join("")}</ol></div>` : ""}
-      <p class="small"><a href="#" data-help="${esc(i.help)}">More about this in Help</a></p>
+      <p class="small"><a href="#" data-help="${esc(i.help)}">More about this in Help</a>
+        · <button class="linkish" data-hide-rule="${esc(i.rule)}" data-hide-subject="${esc(i.subject ?? "")}" data-hide-title="${esc(i.title)}"
+            data-hidden="${i.hidden ? 1 : 0}" title="Hidden issues stay out of the counts and the health score; tick 'Show hidden' to see them again.">${esc(hideLabel(i))}</button></p>
     </div></details>`;
 }
+
+document.addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-hide-rule]");
+  if (!b) return;
+  e.preventDefault();
+  b.disabled = true;
+  const hide = b.dataset.hidden !== "1";
+  try {
+    await post("/api/issues/hide", { rule: b.dataset.hideRule, subject: b.dataset.hideSubject, title: b.dataset.hideTitle, hidden: hide });
+  } finally { b.disabled = false; }
+  // Update every copy of this issue on screen (device panel and lists), then refresh the counts.
+  document.querySelectorAll("[data-hide-rule]").forEach((x) => {
+    if (x.dataset.hideRule !== b.dataset.hideRule || x.dataset.hideSubject !== b.dataset.hideSubject) return;
+    x.dataset.hidden = hide ? "1" : "0";
+    x.textContent = hide ? "Show this again" : "Hide this issue";
+    const d = x.closest("details.issue");
+    if (d) d.classList.toggle("hidden-issue", hide);
+  });
+  const tab = (location.hash || "#overview").slice(1).split("/")[0];
+  if (tab === "analysis" || tab === "overview") LOADERS[tab]();
+});
 
 // ---------------------------------------------------------------- overview
 async function loadOverview() {
@@ -125,8 +153,8 @@ async function loadOverview() {
   $("#net-summary").textContent = n.summary;
   const c = n.issue_counts;
   $("#net-counts").innerHTML = ["high", "medium", "low", "info"].map((k) => `<span class="sev ${k}">${c[k]} ${SEV[k].toLowerCase()}</span>`).join(" ")
-    + ` <span class="muted small">${esc(n.devices_poor)} of ${esc(n.devices_seen)} Wi-Fi devices in poor shape</span>`;
-  const top = a.issues.filter((i) => i.severity === "high" || i.severity === "medium").slice(0, 6);
+    + ` <span class="muted small">${esc(n.devices_poor)} of ${esc(n.devices_seen)} Wi-Fi devices in poor shape${n.hidden ? ` · ${esc(n.hidden)} hidden by you` : ""}</span>`;
+  const top = a.issues.filter((i) => !i.hidden && (i.severity === "high" || i.severity === "medium")).slice(0, 6);
   $("#top-issues").innerHTML = top.length ? top.map((i) => renderIssue(i)).join("") : '<p class="muted">Nothing needs attention right now.</p>';
 
   $("#units-table").innerHTML = "<tr><th>Unit</th><th>Model</th><th>IP</th><th>Chip</th><th>Health</th><th>Status</th></tr>" +
@@ -153,8 +181,11 @@ async function loadAnalysis() {
   await refreshBase();
   const hours = $("#an-hours").value, sev = $("#an-sev").value.split(",").filter(Boolean);
   const [a, t] = await Promise.all([api(`/api/analysis?hours=${hours}`), api("/api/trends?days=30")]);
-  const shown = a.issues.filter((i) => !sev.length || sev.includes(i.severity));
-  $("#an-count").textContent = `${shown.length} of ${a.issues.length} issues`;
+  const showHidden = $("#an-hidden").checked;
+  const nHidden = a.issues.filter((i) => i.hidden).length;
+  $("#an-hidden-n").textContent = nHidden ? `(${nHidden})` : "";
+  const shown = a.issues.filter((i) => (!sev.length || sev.includes(i.severity)) && (showHidden || !i.hidden));
+  $("#an-count").textContent = `${shown.length} of ${a.issues.length} issues` + (nHidden && !showHidden ? ` · ${nHidden} hidden` : "");
   $("#an-issues").innerHTML = shown.length ? shown.map((i) => renderIssue(i)).join("") : '<p class="muted">No issues of this kind in this period.</p>';
   $("#an-units").innerHTML = "<tr><th>Unit</th><th>Health</th><th>Notes</th></tr>" +
     Object.entries(a.units).map(([mac, h]) => `<tr><td>${esc(unitName(mac))}</td><td class="${scoreClass(h.score)}">${h.score ?? "–"} ${h.label ? `<span class="muted small">${esc(h.label)}</span>` : ""}</td><td class="wrap muted">${esc(h.note || "")}</td></tr>`).join("");
@@ -681,7 +712,7 @@ document.addEventListener("DOMContentLoaded", () => {
   $("#ev-dev").addEventListener("search", loadEvents);
   $("#devices-table").addEventListener("click", (ev) => { const th = ev.target.closest("th[data-sort]"); if (!th) return;
     ev.stopPropagation(); devSort = { key: th.dataset.sort, dir: devSort.key === th.dataset.sort ? -devSort.dir : 1 }; loadDevices(); });
-  ["#an-hours", "#an-sev"].forEach((s) => $(s).addEventListener("change", loadAnalysis));
+  ["#an-hours", "#an-sev", "#an-hidden"].forEach((s) => $(s).addEventListener("change", loadAnalysis));
   start();
   setInterval(() => { const t = document.querySelector("#tabs button.on"); if (t && !$("#tabs").hidden && $("#drawer").hidden) ({ overview: loadOverview, devices: loadDevices })[t.dataset.tab]?.(); }, 60000);
 });

@@ -28,6 +28,42 @@ def wired_counters(mac: str) -> list[dict[str, Any]]:
     return out
 
 
+def is_backhaul_iface(iface: str, info_ifaces: list[dict[str, Any]] | None = None) -> bool:
+    """A unit's own link up to the mesh: MediaTek apcli*, Qualcomm sta* (station-mode interfaces)."""
+    import re
+    if re.fullmatch(r"apcli[ix]?\d+", iface) or re.fullmatch(r"sta\d+", iface):
+        return True
+    return any(i["iface"] == iface and i.get("type") == "managed" for i in info_ifaces or [])
+
+
+def backhaul_traffic(mac: str, info: dict[str, Any], since: float) -> dict[str, Any]:
+    """Traffic over each backhaul interface (Mbit/s, both directions) per poll, labelled with its band."""
+    from .collectors.asus.parsers import band_of_freq, band_of_iface
+    ifaces = info.get("ifaces") or []
+    band_by_iface = {i["iface"]: i.get("band") or band_of_freq(i.get("freq")) for i in ifaces}
+    rows = [c for c in db.iface_counters_since(since) if c["unit"] == mac and is_backhaul_iface(c["iface"], ifaces)]
+    by: dict[str, list] = defaultdict(list)
+    for c in rows:
+        by[c["iface"]].append(c)
+    series: dict[str, list[list[float]]] = {}
+    totals: dict[str, float] = {}
+    for iface, rs in sorted(by.items()):
+        band = band_by_iface.get(iface) or band_of_iface(iface, info.get("bands"))
+        label = f"{band} GHz ({iface})" if band else iface
+        pts, tot = [], 0.0
+        for a, b in zip(rs, rs[1:]):
+            dt = b["ts"] - a["ts"]
+            if dt <= 0 or b["rx_bytes"] < a["rx_bytes"] or b["tx_bytes"] < a["tx_bytes"]:
+                continue   # counter reset (restart)
+            byts = (b["rx_bytes"] - a["rx_bytes"]) + (b["tx_bytes"] - a["tx_bytes"])
+            tot += byts
+            pts.append([b["ts"], round(byts * 8 / dt / 1e6, 2)])
+        if pts:
+            series[label] = pts
+            totals[label] = round(tot / 1e9, 2)
+    return {"series": series, "totals_gb": totals}
+
+
 def detail(mac: str) -> dict[str, Any] | None:
     now = time.time()
     mac = mac.lower()
@@ -72,7 +108,7 @@ def detail(mac: str) -> dict[str, Any] | None:
         ifaces.append({**i, "clients": per_iface.get(name, 0), **rates.get(name, {}),
                        "noise": (iwc.get(name) or {}).get("noise"), "tx_fail_pct": r.get("tx_fail_pct"),
                        "rx_crc_pct": r.get("rx_crc_pct"), "temperature": r.get("temperature"),
-                       "role": "backhaul" if name.startswith("apcli") or (i.get("ssid") or "").isupper() and len(i.get("ssid") or "") == 32
+                       "role": "backhaul" if is_backhaul_iface(name, info.get("ifaces")) or (i.get("ssid") or "").isupper() and len(i.get("ssid") or "") == 32
                        else "network"})
     ifaces.sort(key=lambda x: (x.get("band") or "z", x["iface"]))
 
@@ -101,6 +137,8 @@ def detail(mac: str) -> dict[str, Any] | None:
         "conn_top": [{**c, "name": display_name(devs.get(c.get("mac")), c.get("mac") or c["ip"]) if c.get("mac") else c["ip"]}
                      for c in info.get("conn_top") or []],
         "conn_total": info.get("conn_total"),
+        "backhaul_traffic": backhaul_traffic(mac, info, now - 86400) if u.get("role") != "router" else None,
+        "tools": info.get("tools"),
         "system_history": {k: [[h["ts"], h[k]] for h in hist if h.get(k) is not None]
                            for k in ("cpu_pct", "max_core_pct", "mem_used_pct", "temp_c", "load1", "conntrack")},
     }

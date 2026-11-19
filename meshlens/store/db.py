@@ -144,6 +144,29 @@ CREATE TABLE IF NOT EXISTS conn_samples (
 );
 CREATE INDEX IF NOT EXISTS conn_samples_ts ON conn_samples(ts);
 
+CREATE TABLE IF NOT EXISTS probes (
+  id TEXT PRIMARY KEY, ip TEXT, chip TEXT, bands TEXT, firmware TEXT,
+  adopted INTEGER, paired INTEGER, room TEXT, spot TEXT,
+  first_seen REAL, last_seen REAL, last_scan REAL, last_error TEXT,
+  info TEXT, env TEXT, air TEXT
+);
+
+CREATE TABLE IF NOT EXISTS probe_aps (
+  ts REAL, probe TEXT, bssid TEXT, ssid TEXT, band TEXT, channel INTEGER, rssi INTEGER, width INTEGER,
+  pmf TEXT, akm TEXT, clients INTEGER, own INTEGER, joined INTEGER
+);
+CREATE INDEX IF NOT EXISTS probe_aps_ts ON probe_aps(ts);
+
+CREATE TABLE IF NOT EXISTS probe_clients (
+  ts REAL, probe TEXT, mac TEXT, bssid TEXT, channel INTEGER, rssi INTEGER, frames INTEGER, bytes INTEGER
+);
+CREATE INDEX IF NOT EXISTS probe_clients_ts ON probe_clients(ts);
+
+CREATE TABLE IF NOT EXISTS hidden_issues (
+  rule TEXT, subject TEXT, hidden_at REAL, title TEXT,
+  PRIMARY KEY (rule, subject)
+);
+
 CREATE TABLE IF NOT EXISTS daily_device_summary (
   day TEXT, mac TEXT, kicks INTEGER, roams INTEGER, connects INTEGER, disconnects INTEGER,
   min_rssi INTEGER, max_rssi INTEGER,
@@ -290,7 +313,8 @@ def prune(raw_days: int, summary_days: int, now: float | None = None) -> None:
     with _write_lock:
         c = conn()
         for t in ("station_samples", "radio_samples", "iface_counters", "events", "unit_settings", "inventory_events",
-                  "plc_rates", "ping_minutes", "host_lan", "air_scan", "unit_samples", "conn_samples"):
+                  "plc_rates", "ping_minutes", "host_lan", "air_scan", "unit_samples", "conn_samples",
+                  "probe_aps", "probe_clients"):
             c.execute(f"DELETE FROM {t} WHERE ts < ?", (cut,))
         day_cut = time.strftime("%Y-%m-%d", time.localtime(now - summary_days * 86400))
         c.execute("DELETE FROM daily_device_summary WHERE day < ?", (day_cut,))
@@ -329,9 +353,13 @@ def station_history(mac: str, since: float) -> list[dict[str, Any]]:
     return _rows(conn().execute("SELECT * FROM station_samples WHERE mac = ? AND ts >= ? ORDER BY ts", (mac.lower(), since)))
 
 
-def events(since: float, mac: str | None = None, kinds: list[str] | None = None, limit: int = 1000) -> list[dict[str, Any]]:
+def events(since: float, mac: str | None = None, kinds: list[str] | None = None, limit: int = 1000,
+           until: float | None = None) -> list[dict[str, Any]]:
     q = "SELECT * FROM events WHERE ts >= ?"
     args: list[Any] = [since]
+    if until is not None:
+        q += " AND ts <= ?"
+        args.append(until)
     if mac:
         q += " AND mac = ?"
         args.append(mac.lower())
@@ -342,10 +370,46 @@ def events(since: float, mac: str | None = None, kinds: list[str] | None = None,
     args.append(limit)
     out = _rows(conn().execute(q, args))
     from ..collectors.asus.parsers import band_of_iface
+    bands = unit_bands()
     for e in out:
         e["detail"] = json.loads(e["detail"] or "{}")
-        e["band"] = band_of_iface(e["iface"]) if e.get("iface") else None
+        e["band"] = band_of_iface(e["iface"], bands.get(e.get("unit") or "")) if e.get("iface") else None
     return out
+
+
+def unit_bands() -> dict[str, dict[str, str]]:
+    """Interface prefix -> band per unit (from its radio list; dual-band MediaTek units call 5 GHz rax)."""
+    out = {}
+    for mac, info in conn().execute("SELECT mac, info FROM units"):
+        try:
+            b = (json.loads(info or "{}") or {}).get("bands")
+        except ValueError:
+            b = None
+        if b:
+            out[mac] = b
+    return out
+
+
+def station_samples_between(since: float, until: float) -> list[dict[str, Any]]:
+    return _rows(conn().execute(
+        "SELECT ts, unit, mac, band, rssi, tx_rate FROM station_samples WHERE ts >= ? AND ts <= ? ORDER BY ts", (since, until)))
+
+
+def band_history(since: float, macs: Iterable[str] | None = None) -> dict[str, dict[str, Any]]:
+    """Per device: samples on 5/6 GHz and on 2.4 GHz since ``since``, and when each band was last seen.
+
+    ``macs`` limits it to those devices (much faster on a week of samples)."""
+    macs = sorted(set(macs)) if macs is not None else None
+    if macs is not None and not macs:
+        return {}
+    where = f" AND mac IN ({', '.join('?' for _ in macs)})" if macs else ""
+    rows = conn().execute(
+        f"""SELECT mac, SUM(band IN ('5', '6')), SUM(band = '2.4'),
+                  MAX(CASE WHEN band IN ('5', '6') THEN ts END), MAX(CASE WHEN band = '2.4' THEN ts END),
+                  AVG(CASE WHEN band IN ('5', '6') THEN rssi END)
+           FROM station_samples WHERE ts >= ?{where} GROUP BY mac""", (since, *(macs or [])))
+    return {m: {"hi": hi or 0, "lo": lo or 0, "last_hi": lh, "last_lo": ll, "hi_rssi": round(r) if r is not None else None}
+            for m, hi, lo, lh, ll, r in rows}
 
 
 def latest_radio() -> list[dict[str, Any]]:
@@ -604,3 +668,68 @@ def unit_samples_since(since: float, unit: str | None = None) -> list[dict[str, 
 
 def conn_samples_since(since: float) -> list[dict[str, Any]]:
     return _rows(conn().execute("SELECT * FROM conn_samples WHERE ts >= ? ORDER BY ts", (since,)))
+
+
+# ---------------------------------------------------------------- issues the user chose to hide
+
+def hidden_issues() -> list[dict[str, Any]]:
+    return _rows(conn().execute("SELECT * FROM hidden_issues ORDER BY hidden_at DESC"))
+
+
+def set_issue_hidden(rule: str, subject: str, hidden: bool, title: str | None = None) -> None:
+    with _write_lock:
+        c = conn()
+        if hidden:
+            c.execute("INSERT OR REPLACE INTO hidden_issues(rule, subject, hidden_at, title) VALUES (?, ?, ?, ?)",
+                      (rule, subject, time.time(), title))
+        else:
+            c.execute("DELETE FROM hidden_issues WHERE rule = ? AND subject = ?", (rule, subject))
+        c.commit()
+
+
+# ---------------------------------------------------------------- ESP32 probes
+
+_PROBE_JSON = ("info", "env", "air")
+
+
+def upsert_probe(pid: str, **fields: Any) -> None:
+    cols = {k: v for k, v in fields.items() if v is not None}
+    with _write_lock:
+        c = conn()
+        c.execute("INSERT OR IGNORE INTO probes(id) VALUES (?)", (pid,))
+        if cols:
+            c.execute(f"UPDATE probes SET {', '.join(f'{k} = ?' for k in cols)} WHERE id = ?", (*cols.values(), pid))
+        c.commit()
+
+
+def _probe_row(p: dict[str, Any]) -> dict[str, Any]:
+    for k in _PROBE_JSON:
+        try:
+            p[k] = json.loads(p.get(k) or "null")
+        except ValueError:
+            p[k] = None
+    return p
+
+
+def probes() -> list[dict[str, Any]]:
+    return [_probe_row(p) for p in _rows(conn().execute("SELECT * FROM probes ORDER BY room, id"))]
+
+
+def probe(pid: str) -> dict[str, Any] | None:
+    r = _rows(conn().execute("SELECT * FROM probes WHERE id = ?", (pid,)))
+    return _probe_row(r[0]) if r else None
+
+
+def delete_probe(pid: str) -> None:
+    with _write_lock:
+        c = conn()
+        c.execute("DELETE FROM probes WHERE id = ?", (pid,))
+        c.commit()
+
+
+def probe_aps_since(since: float) -> list[dict[str, Any]]:
+    return _rows(conn().execute("SELECT * FROM probe_aps WHERE ts >= ? ORDER BY ts", (since,)))
+
+
+def probe_clients_since(since: float) -> list[dict[str, Any]]:
+    return _rows(conn().execute("SELECT * FROM probe_clients WHERE ts >= ? ORDER BY ts", (since,)))

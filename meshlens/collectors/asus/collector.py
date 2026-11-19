@@ -42,6 +42,8 @@ class UnitResult:
     settings: dict[str, str] | None = None
     info: dict[str, Any] = field(default_factory=dict)     # snapshot shown on the Router tab
     sections: dict[str, str] = field(default_factory=dict)
+    bands: dict[str, str] = field(default_factory=dict)    # interface prefix -> band for this unit
+    raw_unparsed: dict[str, str] = field(default_factory=dict)  # output whose format isn't verified yet
 
 
 def parse_unit(text: str, mac: str, ip: str, main: bool) -> UnitResult:
@@ -49,30 +51,52 @@ def parse_unit(text: str, mac: str, ip: str, main: bool) -> UnitResult:
     s = P.split_sections(text)
     r = UnitResult(mac=mac, ip=ip, main=main, ok=True, sections=s)
     r.identity = P.parse_nvram_kv(s.get("identity", ""))
-    r.chip = P.chip_family(P.which_tools(s.get("tools", "")))
+    tools = P.which_tools(s.get("tools", ""))
+    r.chip = P.chip_family(tools, r.identity.get("wl_ifnames", ""))
+    # Interface prefix -> band from the unit's own radio list (dual-band MediaTek units call their 5 GHz radio rax).
+    r.bands = P.iface_band_map(r.identity)
+    raw_unparsed: dict[str, str] = {}
     for key, body in s.items():
         if key.startswith("sta_hostapd:"):
             r.stations += P.parse_hostapd_all_sta(body, key.split(":", 1)[1])
         elif key.startswith("sta_wlanconfig:"):
             r.stations += P.parse_wlanconfig_list_sta(body, key.split(":", 1)[1])
+        elif key.startswith("mactable:"):
+            got = P.parse_mac_table(body, key.split(":", 1)[1], r.bands)
+            r.stations += got
+            if body.strip() and not got:
+                raw_unparsed[key] = body[:4000]
+        elif key.startswith("iwpriv_stat:") and body.strip():
+            raw_unparsed[key] = body[:4000]   # format not verified yet: kept for a parser
         elif key.startswith("mwctl_stat:"):
             iface = key.split(":", 1)[1]
             st = P.parse_mwctl_stat(body)
             if st:
-                r.radios.append({"iface": iface, "band": P.band_of_iface(iface), **st})
+                r.radios.append({"iface": iface, "band": P.band_of_iface(iface, r.bands), **st})
+    for st in r.stations:
+        if st.get("iface") and r.bands:
+            st["band"] = P.band_of_iface(st["iface"], r.bands) or st.get("band")
+    iwc = P.parse_iwconfig(s.get("iwconfig", ""), r.bands)
     if r.chip == "qualcomm":
-        for i in P.parse_iwconfig(s.get("iwconfig", "")):
+        for i in iwc:
             if i["iface"] in ("ath0", "ath1", "ath2"):
                 r.radios.append({"iface": i["iface"], "band": i["band"], "noise": i.get("noise")})
     r.counters = P.parse_proc_net_dev(s.get("net_dev", ""))
-    r.events = P.parse_log_events(s.get("log", ""), unit=mac)
+    r.events = P.parse_log_events(s.get("log", ""), unit=mac, bands=r.bands)
     if "settings" in s:
         r.settings = P.parse_nvram_kv(s["settings"])
-    r.info = {"identity": r.identity, **P.parse_uptime(s.get("uptime", "")), "ifaces": P.parse_iw_dev(s.get("iw_dev", "")),
-              "iwconfig": P.parse_iwconfig(s.get("iwconfig", "")), "chip": r.chip}
+    ifaces = P.parse_iw_dev(s.get("iw_dev", ""), r.bands)
+    if not ifaces:
+        # No `iw` on the unit (older MediaTek firmware): list its interfaces from iwconfig instead.
+        ifaces = [{k: v for k, v in i.items() if k in ("iface", "band", "ssid", "channel", "freq")}
+                  | {"type": "managed" if i["iface"].startswith("apcli") else "AP", "source": "iwconfig"}
+                  for i in iwc if i.get("ssid") is not None]
+    r.info = {"identity": r.identity, **P.parse_uptime(s.get("uptime", "")), "ifaces": ifaces,
+              "iwconfig": iwc, "chip": r.chip, "tools": sorted(tools), "bands": r.bands}
     r.info["links"] = P.parse_links(s.get("links", ""))
     if s.get("port_status", "").strip():
         r.info["ports"] = P._json(s["port_status"])
+    r.raw_unparsed = raw_unparsed
     return r
 
 
@@ -183,8 +207,11 @@ class AsusCollector:
             if r.settings is not None:
                 db.insert_many("unit_settings", [{"ts": now, "unit": r.mac, "data": json.dumps(r.settings)}])
             new = db.insert_events(r.events)
-            jsonl.append(self.data_root, {"type": "asus_unit", "unit": r.mac, "chip": r.chip, "stations": r.stations,
-                                          "radios": r.radios, "new_events": new})
+            rec = {"type": "asus_unit", "unit": r.mac, "chip": r.chip, "stations": r.stations,
+                   "radios": r.radios, "new_events": new}
+            if r.raw_unparsed:
+                rec["raw_unparsed"] = r.raw_unparsed
+            jsonl.append(self.data_root, rec)
 
         # Units that appear in the client data but are not managed nodes (e.g. Office, Garden).
         # Model, firmware, address and the controller's signal reading for every node it knows.
@@ -308,7 +335,7 @@ class AsusCollector:
             self.prev_links[r.mac] = links
         # Channel per band (first interface of each band carries the radio's channel).
         chans: dict[str, tuple] = {}
-        for i in P.parse_iw_dev(r.sections.get("iw_dev", "")):
+        for i in r.info.get("ifaces") or P.parse_iw_dev(r.sections.get("iw_dev", ""), r.bands):
             if i.get("band") and i.get("channel") and i["band"] not in chans and not i["iface"].startswith("apcli"):
                 chans[i["band"]] = (i["channel"], i.get("width"), i["iface"])
         pc = self.prev_chan.get(r.mac)

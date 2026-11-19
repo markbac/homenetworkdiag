@@ -192,3 +192,7 @@ input[type=datetime-local] { padding: 6px 8px; border: 1px solid var(--line); bo
 
 tr.ev-unit td:first-child { border-left-color: var(--c7); } .ek-unit { background: color-mix(in srgb, var(--c7) 25%, transparent); }
 .legend i.ek.unit { background: var(--c7); }
+tr.good-row td { background: color-mix(in srgb, var(--good) 8%, transparent); }
+details.issue.hidden-issue { opacity: .6; }
+button.linkish { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; font: inherit; text-decoration: underline; }
+form.inline { display: inline-flex; gap: 6px; flex-wrap: wrap; align-items: center; }
