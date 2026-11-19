@@ -26,6 +26,10 @@
 </dl>
 
 <h2 id="issues">Issues: what they mean</h2>
+<p id="hide-issues"><b>Hiding an issue.</b> Every issue has a "Hide this issue" link. It hides that kind of issue for that one
+  device, unit or network item (for example "keeps disconnecting" for one smart plug), and only that. Hidden issues are left out of
+  the counts, the summary and the network health score, but MeshLens keeps checking them. Tick <i>Show hidden</i> on the Analysis
+  tab to see them again (they are greyed out) and use "Show this again" to undo.</p>
 <p>Every issue has three parts. <b>Seen</b> is the evidence MeshLens found. <b>Why</b> is the most likely cause. <b>Try</b> lists fixes, simplest first.
   Severity: <span class="sev high">High</span> hurts people now, <span class="sev medium">Medium</span> is worth fixing,
   <span class="sev low">Low</span> is minor, <span class="sev info">Info</span> is just for you to know. You can change the thresholds under
@@ -202,7 +206,56 @@
 <h3 id="issue-radar_dfs">Radar forced 5 GHz off its channel</h3>
 <p>5 GHz channels 52-144 are DFS channels, shared with weather and other radar. When a unit detects radar it must leave the channel
   immediately and listen on the new one for a minute before transmitting, so every 5 GHz device on that unit drops or stalls, and a
-  5 GHz backhaul moves too. Choose a 5 GHz channel from 36-48 to avoid it. MeshLens reads these events from the units' own logs.</p>
+  5 GHz backhaul moves too. MeshLens reads these events from the units' own logs and, for each one, counts the devices that dropped,
+  the dual-band devices that fell back to 2.4 GHz while 5 GHz was moving, and those still stuck there. If only one unit ever reports
+  radar it may be a false trigger near it. Choose a 5 GHz channel from 36-48 to avoid it (see <a href="#channel-plan">Channel plan</a>).</p>
+<h3 id="issue-channel_plan">A better Wi-Fi channel is available</h3>
+<p>The channel planner scores every 5 GHz 80 MHz block and the 2.4 GHz channels 1, 6 and 11 and found one clearly better than
+  the one in use. See <a href="#channel-plan">Channel plan</a> for how the score works.</p>
+<h3 id="issue-stuck_on_24">Stuck on 2.4 GHz</h3>
+<p>A device that normally uses 5 or 6 GHz has been on 2.4 GHz for over an hour. It usually dropped off 5 GHz during a radar event,
+  a channel change or a unit restart and rejoined on 2.4 GHz. ASUS band steering (Smart Connect) only moves a 2.4 GHz device up to
+  5 GHz when its 2.4 GHz signal is very strong, so devices a room or two away can stay on the slower band indefinitely. Reconnect the
+  device's Wi-Fi, keep 5 GHz off radar channels, and consider relaxing the 2.4 GHz steering condition in the Smart Connect Rule.</p>
+<h3 id="issue-network_loop">Possible network loop behind a powerline adapter</h3>
+<p>MeshLens compares what each devolo adapter sees behind it with the mesh. If the main router's own addresses, or Wi-Fi devices of a
+  unit that isn't behind that adapter, show up behind an adapter that isn't the one wired to the router, traffic is going round in a
+  circle: typically a mesh node or wireless bridge plugged into a switch that already reaches the router over powerline, while the node
+  also links to the mesh over Wi-Fi. Symptoms: devices dropping, packet loss, broadcast storms. Keep one path only. The evidence also
+  shows ping loss to the router around the sightings compared with the rest of the time.</p>
+<h3 id="issue-join_failures">Keeps failing to join a unit</h3>
+<p>The Qualcomm units (BD4) log "assoc failed with status N" without saying which device it was; MeshLens pairs each one with the
+  device that the same unit logs leaving in the same second. Status 53 (invalid PMKID): a WPA3 device offers a saved key from another
+  unit and won't fall back to a full login. Status 30 (try again later): with protected management frames the unit still thinks the
+  device is connected. Binding the device to one unit, a WPA2 network for it, or updated firmware/drivers fixes most cases.</p>
+<h3 id="issue-dual_homed">On cable and Wi-Fi with the same address</h3>
+<p>A device answering for one address from two network adapters (typically a Raspberry Pi with both Ethernet and Wi-Fi up). The rest
+  of the network keeps switching which adapter it sends to, so connections stall and traffic sometimes takes the Wi-Fi path. Turn
+  Wi-Fi off on devices that have a cable, or give the Wi-Fi side its own address.</p>
+<h3 id="issue-pmf_mismatch">Protected management frames differ between units</h3>
+<p>Each unit's own setting for PMF (WPA3's protection of disconnect and roaming messages). When units disagree, devices moving
+  between them can be refused (status 30) or have their saved key rejected (status 53). Set it once on the main router.</p>
+<h3 id="issue-firmware_mismatch">Different firmware builds</h3><p>Each model has its own firmware, but builds far apart are worth updating
+  together: mesh fixes usually need both ends.</p>
+<h3 id="issue-speed_path_changed">Speed tests from this PC changed in one step</h3>
+<p>When download speed and latency under load change together between one test and the next, the PC's own path changed (a cable,
+  powerline adapter, Wi-Fi bridge or switch), not the internet line. If bufferbloat disappeared at the same time, it came from the
+  old path, not the line.</p>
+<h3 id="issue-outdoor_wander">Keeps joining the outdoor unit</h3>
+<p>An indoor device that sometimes picks the outdoor unit, at a weak signal through the walls, and then drops back. Bind it to an
+  indoor unit or use a cable.</p>
+<h3 id="issue-mesh_restart">Mesh units restarted together</h3><p>Several units restarting within the same half hour at night is an
+  automatic firmware update or scheduled reboot; during the day it points at a settings change or a power cut.</p>
+<h3 id="issue-suspect_name">Probably not an ASUS device</h3><p>The router guessed an ASUS product name from the address prefix of
+  another maker's chip. Give the device a proper name.</p>
+<h3 id="issue-probe_new">New probe found</h3><p>Pair it on Router → Probes.</p>
+<h3 id="issue-probe_unpaired">MeshLens can't read a probe</h3><p>It is paired with another MeshLens or lost its token: Forget it on the probe, then pair again.</p>
+<h3 id="issue-probe_offline">Probe hasn't reported</h3><p>It is off, out of range, has a flat battery or joined another network.</p>
+<h3 id="issue-probe_alert">Probe alert</h3><p>From the probe's air monitor: disconnect floods, evil twins, Karma access points, beacon
+  floods and trackers that stay near. A few disconnects from your own units are normal (band steering and roaming).</p>
+<h3 id="issue-pmf_mismatch_air">Units advertise different PMF</h3><p>Read by the probes from the units' own beacons, so this is what
+  devices really see. Set PMF once on the main router and let the nodes sync.</p>
+<h3 id="issue-duplicate_unit_name">Two units with the same name</h3><p>Rename one in the ASUS app so reports can tell them apart.</p>
 <h3 id="issue-dfs_channel">Unit on a DFS channel</h3><p>Not a problem by itself, but radar nearby would force it off; see above.</p>
 <h3 id="issue-channel_hopping">Keeps changing channel</h3><p>Each change drops or stalls devices on that band. Pick a fixed, quiet channel.</p>
 <h3 id="issue-link_flap">Wired port dropped and reconnected</h3><p>Linux counts every time a wired link goes down and up. Causes: a loose or
@@ -226,6 +279,33 @@
 <h3 id="issue-qos_off">QoS off while bufferbloat is high</h3><p>Turn on Adaptive QoS with the bandwidth set to about 90% of the router speed
   test's results; that keeps games and calls responsive while someone uploads or downloads.</p>
 
+<h3 id="channel-plan">Channel plan</h3>
+<p>On the main router's page and on This PC, MeshLens scores each 5 GHz 80 MHz block (36-48, 52-64, 100-112, 116-128, 132-144,
+  149-161) and the 2.4 GHz channels 1, 6 and 11. The score adds up: strong neighbours (heard louder than -70 dBm by this PC),
+  weaker neighbours, the busiest channel-utilisation report from an access point in that block, radar detections in the last 30
+  days, and a small penalty for DFS (radar) blocks. Lowest wins. 149-161 is shown but not recommended because it isn't offered in
+  every country (UK: indoor, low power). On 2.4 GHz anything other than 1, 6 or 11 overlaps two of them and takes interference from
+  both. Neighbours are counted from where this PC is, so they reflect that room best. The radar table lists each detection, which
+  unit heard it, where 5 GHz moved, how many devices dropped, and which dual-band devices fell back to 2.4 GHz (and are still there).</p>
+<h3 id="backhaul-traffic">Backhaul traffic</h3>
+<p>For each mesh node, the traffic over its own link to the mesh per band (MediaTek <code>apcli</code> interfaces, Qualcomm
+  <code>sta</code> interfaces), from the interface counters MeshLens reads every poll. It shows which band a wireless bridge actually
+  uses. Units that offload packets in hardware can leave some traffic out of these counters.</p>
+<h2 id="probes">ESP32 probes</h2>
+<p>Probes are small ESP32 boards (the C5 probe firmware) that MeshLens finds by themselves: they announce themselves on the
+  network every 30 seconds (UDP port 47800 and mDNS <code>_hndprobe._tcp</code>). If one doesn't show up, enter its address
+  on Router → Probes.</p>
+<p><b>Pairing:</b> press Pair; the probe shows a 6-digit code on its screen for 5 minutes; type it into MeshLens. MeshLens keeps
+  the probe's token in the Windows Credential Manager and sends it with every request; the probe then answers only this MeshLens.
+  Forget in MeshLens removes the token here; to unpair the probe itself use SETUP → PROBE → Forget on its screen.</p>
+<p><b>Room:</b> set where the probe is, so its findings are labelled with the room.</p>
+<p><b>What MeshLens reads</b> (every 5 minutes; whether it is there, every minute): every access point it hears on 2.4 and 5 GHz
+  with signal, channel and PMF from the beacons; the devices talking on its channel and how much; its alerts (disconnect floods,
+  evil twins, Karma access points, beacon floods, trackers); temperature and battery. The channel plan merges what every probe
+  hears with this PC's survey, using each network's strongest signal anywhere in the house. Nothing on the probe is changed except
+  pairing and its room, and only when you ask.</p>
+<p><b>Limits:</b> a probe listens on one channel at a time (the one it is joined to) except while hopping; it cannot see 6 GHz;
+  MeshLens reads only the probe's latest results, so nothing is collected while MeshLens is closed.</p>
 <h2 id="hostpc">This PC as a network sensor</h2>
 <p>MeshLens uses the PC it runs on to measure what the routers don't report:</p>
 <dl>

@@ -25,6 +25,30 @@ USB_ADAPTER_HINT = ("If this is a Windows PC with a USB Wi-Fi adapter: plug it i
                     "Advanced set \"Roaming aggressiveness\" to Lowest or Medium-low and turn off power saving.")
 
 
+# 802.11 association status codes seen on mesh units: (meaning, cause, fixes).
+_JOIN_STATUS: dict[int | None, tuple[str, str, list[str]]] = {
+    53: ("invalid PMKID",
+         "When a WPA3 device moves between units it offers a saved key from its last connection (PMKID caching) to save "
+         "time. This unit doesn't recognise the key and refuses; a well-behaved device then does a full login, but this one "
+         "keeps retrying with the old key and gives up, bouncing back to the unit it came from. Common with mixed-chip "
+         "meshes (MediaTek router, Qualcomm nodes) and some smart speakers and TVs.",
+         ["Bind the device to one unit (AiMesh → the client → Bind) so it stops trying to roam.",
+          "Move it to a WPA2 network (e.g. an IoT network set to WPA2-Personal), which doesn't use this key caching.",
+          "Update the firmware on all units so they match, and the device's own software."]),
+    30: ("rejected temporarily, try again later",
+         "With Protected Management Frames (PMF, part of WPA3) the unit still thinks the device is connected and checks "
+         "with the old connection before allowing a new one. This happens when a device vanishes without saying goodbye "
+         "(sleep, weak signal, driver reset) and comes straight back.",
+         ["Update the device's Wi-Fi driver (Windows: from the adapter maker, not Windows Update).",
+          "Turn off Wi-Fi power saving on the device.",
+          "If it is a PC with a USB adapter, see the weak-signal tips: it is probably dropping out before rejoining."]),
+    17: ("unit full", "The unit has as many devices as it allows on that radio.",
+         ["Spread devices across units, or move some to another band."]),
+    None: ("refused", "The unit refused the device's request to join.",
+           ["Forget the network on the device and join again; update its Wi-Fi driver or firmware."]),
+}
+
+
 def _label(score: float | None) -> str | None:
     if score is None:
         return None
@@ -69,8 +93,13 @@ def _thresholds(settings: dict[str, dict[str, str]], units: list[dict[str, Any]]
 
 def analyse(events: Iterable[dict[str, Any]], samples: Iterable[dict[str, Any]], radios: list[dict[str, Any]],
             units: list[dict[str, Any]], devices: list[dict[str, Any]], settings: dict[str, dict[str, str]],
-            cfg: AnalysisConfig | None = None, now: float | None = None, net: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Run every rule. Returns issues (most severe first) and device / unit / network health."""
+            cfg: AnalysisConfig | None = None, now: float | None = None, net: dict[str, Any] | None = None,
+            hidden: Iterable[tuple[str, str]] | None = None) -> dict[str, Any]:
+    """Run every rule. Returns issues (most severe first) and device / unit / network health.
+
+    ``hidden``: (rule, subject) pairs the user chose to hide. Those issues are still returned, marked
+    ``hidden: True``, but don't count towards the issue totals, the summary or the health scores.
+    """
     cfg = cfg or AnalysisConfig()
     now = now or time.time()
     events = sorted(events, key=lambda e: e["ts"])
@@ -308,6 +337,66 @@ def analyse(events: Iterable[dict[str, Any]], samples: Iterable[dict[str, Any]],
                      "A wired (Ethernet) backhaul removes the wireless backhaul as a cause."],
                     evs[i]["ts"], evs[j]["ts"], count=len(macs)))
 
+    # Failed joins: the Qualcomm driver logs "assoc failed with status N" without the device's address, but the
+    # same device's leave/disconnect line is logged in the same second on the same unit, so pair them by time.
+    fails = [e for e in events if e["kind"] == "assoc_failed"]
+    if fails:
+        departures: dict[str, list[tuple[float, str]]] = defaultdict(list)
+        for e in events:
+            if e["kind"] in ("leave", "disconnect") and e.get("mac") and e.get("unit"):
+                departures[e["unit"]].append((e["ts"], e["mac"]))
+        by_dev: dict[tuple[str, str, int], list[float]] = defaultdict(list)
+        unpaired: dict[tuple[str, int], int] = defaultdict(int)
+        for f in fails:
+            status = (f.get("detail") or {}).get("status")
+            near = [(abs(t - f["ts"]), m) for t, m in departures.get(f.get("unit") or "", []) if abs(t - f["ts"]) <= 2]
+            if f.get("mac"):
+                by_dev[(f["mac"], f["unit"], status)].append(f["ts"])
+            elif near:
+                by_dev[(min(near)[1], f["unit"], status)].append(f["ts"])
+            else:
+                unpaired[(f.get("unit"), status)] += 1
+        for (mac, unit, status), ts in by_dev.items():
+            if len(ts) < getattr(cfg, "join_fail_count", 10):
+                continue
+            meaning, cause, fixes = _JOIN_STATUS.get(status, _JOIN_STATUS[None])
+            issues.append(_issue(
+                "join_failures", "medium", "device", mac, f"{dname(mac)} keeps failing to join {uname(unit)}",
+                f"{len(ts)} failed joins to {uname(unit)} with status {status} ({meaning}) "
+                + (f"at {_hm(min(ts))}" if max(ts) - min(ts) < 120 else f"between {_hm(min(ts))} and {_hm(max(ts))}")
+                + ". Paired with the device by time: the unit logs these without the device's address.",
+                cause, fixes, min(ts), max(ts), count=len(ts), status=status))
+
+    # Indoor devices that keep wandering onto an outdoor unit (weak through walls, so they drop and come back).
+    outdoor = {m for u in units if "outdoor" in (u.get("model") or "").lower() for m in [u["mac"], *(u.get("macs") or [])]}
+    if outdoor:
+        for mac, rows in smp.items():
+            d = devs.get(mac) or {}
+            mobile = any(k in (d.get("dtype") or d.get("type") or "").lower() for k in ("phone", "tablet", "laptop", "watch"))
+            if len(rows) < 20 or mac in unit_name or mobile or d.get("randomised"):
+                continue   # phones and laptops really do go into the garden
+            out_rows = [r for r in rows if r.get("unit") in outdoor]
+            share = len(out_rows) / len(rows)
+            if not 0.05 <= share <= 0.7:
+                continue   # never there, or it lives outside
+            rs = [r["rssi"] for r in out_rows if r.get("rssi") is not None]
+            typical = statistics.median(rs) if rs else None
+            if typical is None or typical > -68:
+                continue
+            ou = out_rows[-1]["unit"]
+            drops = len(per_kind.get(mac, {}).get("disconnect", []))
+            issues.append(_issue(
+                "outdoor_wander", "medium" if drops >= 10 else "low", "device", mac,
+                f"{dname(mac)} keeps joining the outdoor unit {uname(ou)}",
+                f"{share:.0%} of its readings are on {uname(ou)}, typically at {typical:.0f} dBm; the rest on indoor units"
+                + (f"; {drops} disconnects in the period" if drops else "") + ".",
+                "An outdoor unit is heard faintly through walls and windows. Devices near the edge of the house sometimes pick "
+                "it, get a weak, slow link, then drop and rejoin an indoor unit, again and again.",
+                ["Bind the device to the nearest indoor unit (ASUS app → the client → Bind / AiMesh preferred node).",
+                 "For a TV or other fixed device, a cable or binding is the reliable fix.",
+                 "If many indoor devices do this, lower the outdoor unit's transmit power or set a higher roaming threshold on it."],
+                rows[0]["ts"], rows[-1]["ts"]))
+
     # Crowded 2.4 GHz radios (devices connected in the last 10 minutes).
     recent: dict[tuple[str, str], set[str]] = defaultdict(set)
     for mac, rows in smp.items():
@@ -394,6 +483,10 @@ def analyse(events: Iterable[dict[str, Any]], samples: Iterable[dict[str, Any]],
         from .analysis_net import net_issues
         issues += net_issues(net, devs, now)
     issues.sort(key=lambda i: (SEVERITY_ORDER[i["severity"]], -(i.get("to") or 0)))
+    hide = {(r, str(s)) for r, s in (hidden or [])}
+    for i in issues:
+        i["hidden"] = (i["rule"], str(i.get("subject"))) in hide
+    live = [i for i in issues if not i["hidden"]]
 
     # ------------------------------------------------ health
     dev_health = {mac: {"score": scores[mac], "label": _label(scores[mac]), **facts[mac]} for mac in facts}
@@ -416,7 +509,7 @@ def analyse(events: Iterable[dict[str, Any]], samples: Iterable[dict[str, Any]],
                     elif val is not None and val >= warn:
                         sc -= 8
             # Each "many devices dropped at once" counts, but a busy day can't take the unit to zero on its own.
-            sc -= min(30, 10 * sum(1 for i in issues if i["rule"] == "mass_drop" and i["subject"] == u["mac"]))
+            sc -= min(30, 10 * sum(1 for i in live if i["rule"] == "mass_drop" and i["subject"] == u["mac"]))
             clients = [m for m, f in facts.items() if f["unit"] in [u["mac"], *(u.get("macs") or [])]]
             if clients:
                 share = sum(1 for m in clients if scores[m] < 60) / len(clients)
@@ -436,9 +529,9 @@ def analyse(events: Iterable[dict[str, Any]], samples: Iterable[dict[str, Any]],
             parts.append((0.6, sum(d_scores) / len(d_scores)))
         w = sum(p[0] for p in parts)
         net = sum(p[0] * p[1] for p in parts) / w
-        net -= min(25, 5 * sum(1 for i in issues if i["severity"] == "high"))
+        net -= min(25, 5 * sum(1 for i in live if i["severity"] == "high"))
         net = max(0, round(net))
-    counts = {k: sum(1 for i in issues if i["severity"] == k) for k in SEVERITY_ORDER}
+    counts = {k: sum(1 for i in live if i["severity"] == k) for k in SEVERITY_ORDER}
     return {
         "generated": now,
         "issues": issues,
@@ -446,7 +539,8 @@ def analyse(events: Iterable[dict[str, Any]], samples: Iterable[dict[str, Any]],
         "units": unit_health,
         "network": {"score": net, "label": _label(net), "issue_counts": counts,
                     "devices_poor": sum(1 for s in d_scores if s < 60), "devices_seen": len(d_scores),
-                    "summary": _summary(net, counts, issues)},
+                    "hidden": len(issues) - len(live),
+                    "summary": _summary(net, counts, live)},
     }
 
 

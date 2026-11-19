@@ -212,3 +212,50 @@ Load: one SSH session per unit kept open, commands run sequentially with short t
 - Per radio: busy % on every band including 6 GHz, noise, DFS events, compared with what the probes hear.
 - Per node: backhaul quality, offline periods, client counts.
 - Settings explained (multicast rate, IGMP snooping, guest SSIDs, steering) and changes tracked.
+
+## Dual-band MediaTek nodes (RT-AX57 Go) — added 19 November 2026
+
+Seen as an AiMesh node used as a wireless bridge (firmware 3.0.0.6.102_56747, extendno suffix `_M6PH`):
+
+- No `mwctl`, no `iw` and (apparently) no `hostapd_cli`; `iwconfig` works. Chip family is now worked out from the radio names
+  in `wl_ifnames` when the tools don't say (`ra*`/`rax*` = MediaTek, `ath*` = Qualcomm, `eth*`/`wl*` = Broadcom).
+- `wl_ifnames` is `ra0 rax0`: on this dual-band unit **`rax` is 5 GHz**, not 6 GHz as on the tri-band BT8 (`ra0 rai0 rax0`).
+  Bands are now taken per unit from `wl_ifnames` order (wl0 2.4, wl1 5, wl2 6; the `apcli`/`apclii`/`apclix` backhaul
+  interfaces follow their radio), and from the frequency whenever `iw dev` or `iwconfig` shows one.
+- With no `iw`, the unit's interfaces are listed from `iwconfig`.
+- Stations: without `mwctl`/`hostapd_cli` the collector runs the display-only `iwpriv <radio> get_mac_table` and
+  `iwpriv <radio> stat`. The table parser reads columns by the header row; **its format is not verified on a real unit
+  yet**. Output that doesn't parse (and all `iwpriv stat` output) is kept as `raw_unparsed` in the daily JSON Lines so a
+  verified parser can follow.
+- Backhaul traffic per band comes from the `apcli0` (2.4 GHz) / `apclix0` (5 GHz) interface counters; Qualcomm nodes use `sta0`/`sta1`.
+  Hardware offload can keep some bridged traffic out of these counters.
+
+## Radar, channel plan, loops, failed joins
+
+- **Radar incidents** (`meshlens/channels.py`): radar lines within 5 minutes are one incident; for each, the devices that
+  dropped within 3 minutes, the dual-band devices that showed up on 2.4 GHz within 10 minutes, and those still there now.
+  If every detection comes from one unit, it is flagged as a possible false trigger near that unit.
+- **Channel plan**: every 5 GHz 80 MHz block and 2.4 GHz channels 1/6/11 scored from the PC's air survey (strong
+  neighbours > -70 dBm, weaker neighbours, neighbours' own BSS-load reports — your own units' load is shown but not
+  counted), radar hits in 30 days, and a DFS penalty (bigger once radar has been heard at all). `/api/channels`.
+- **Loops behind powerline** (`collectors/devolo.loop_evidence`): on every devolo poll, the router's own addresses or
+  Wi-Fi clients of a unit not behind that adapter showing up behind a non-router adapter, or a node behind it that also
+  has a live Wi-Fi backhaul, is stored as an `l2_loop` event; the `network_loop` issue adds ping loss to the router around
+  those times.
+- **Failed joins**: Qualcomm `assoc failed with status N` lines carry no MAC; they are paired with the leave/disconnect
+  the same unit logs within 2 s. Status 53 = invalid PMKID (WPA3 key caching across units), 30 = rejected temporarily (PMF).
+
+## More checks and hiding issues
+
+- **dual_homed**: one host name on a wired and a Wi-Fi MAC with the same address, both seen in the last 30 minutes (e.g. a
+  Raspberry Pi with Ethernet and Wi-Fi up). A shared address between *differently* named devices is not reported: the
+  stored address can be stale after a lease moves.
+- **pmf_mismatch / firmware_mismatch**: `wl0_mfp`/`wl1_mfp` read from every unit, and the firmware build number per unit.
+- **speed_path_changed**: a step change in this PC's speed tests (download ×2.5 and the bufferbloat grade together) means the
+  PC's path changed, not the line; bufferbloat that vanished with it came from the old path.
+- **outdoor_wander**: indoor devices (not phones, tablets, laptops or private-address devices) with 5-70% of readings on an
+  `*_Outdoor` unit at -68 dBm or weaker.
+- **mesh_restart**: restarts of 3+ units within 45 minutes are one issue (night = firmware housekeeping), not one per unit.
+- **suspect_name**: an ASUS product name guessed from a non-ASUS address prefix.
+- **Hidden issues** (`hidden_issues` table, `/api/issues/hidden`, `POST /api/issues/hide`): the user can hide one rule for
+  one subject. Hidden issues are still returned with `hidden: true` but don't count in totals, the summary or health scores.

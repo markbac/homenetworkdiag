@@ -70,3 +70,24 @@ All responses carry `probe`, `time` (ISO 8601, NTP) and `band`; records are the 
 ## Privacy
 
 Probes read only 802.11 frame headers (type, addresses, length, rate, signal, retry flag). Payloads are encrypted by WPA and are never read or stored. Device addresses stay on the LAN.
+
+## Implemented in MeshLens (first version, 19 November 2026)
+
+Against the `c5-probe` firmware API (`markbac/esp32`, `c5-probe/docs/api/openapi.yaml`, v0.2.0):
+
+- **Discovery** (`meshlens/collectors/probes.py`): UDP beacons on port 47800 (the packet's source address is used, not the
+  address it claims), mDNS `_hndprobe._tcp`, `probes.addresses` in the settings file, "Look for it" by address on
+  Router → Probes, and LAN devices named like a probe (`esp32c5-XXXXXX`, `c5-xxxxxx`).
+- **Pairing**: Pair → `POST /api/adopt` (code on the probe's screen) → the user types it → `POST /api/adopt/confirm`; the
+  token is kept in the Windows Credential Manager (`MeshLens / probe:<id>`), never in the database or config. A paired
+  probe only follows an announcement to a new address once its old address stops answering as that probe.
+- **Room**: `POST /api/placement` from Router → Probes.
+- **Polling**: `/api/info` every `probes.poll_seconds` (60 s); `/api/wifi.json`, `/api/air.json`, `/api/alerts.json`,
+  `/api/env` every `probes.scan_seconds` (300 s). Stored in `probes`, `probe_aps`, `probe_clients` and as `probe_alert` /
+  `probe_deauths` events (alerts de-duplicated: same text from the same probe within 3 minutes).
+- **Used by**: the channel plan (probe-heard access points merged with this PC's survey, strongest signal anywhere);
+  issues `probe_new`, `probe_unpaired`, `probe_offline`, `probe_alert` (grouped by text), `pmf_mismatch_air` (PMF from
+  your units' beacons); the Probes page (mesh units heard and their PMF, busiest devices on its channel, alerts,
+  environment).
+- **Not yet**: `/api/sync` and `/api/nettest` don't exist on the probe yet, so nothing is collected while MeshLens is
+  closed and probe speed tests aren't run; Zigbee and Bluetooth data aren't read; not tested against a live probe yet.

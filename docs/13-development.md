@@ -76,7 +76,8 @@ Data lives in `%LOCALAPPDATA%\MeshLens` (`config.yaml`, `meshlens.db`, `raw\*.js
 | Topology map | TOP-01, MAP-01/02 | Done (tree view; per-port switch mapping needs the switch collectors) |
 | Latency / jitter / loss monitors, speed tests, bufferbloat | TST-01/02/03/05, ISP-05 | Done |
 | Tray status colour, start with Windows, installer, CI, release workflow | UI-06, NFR-01 | Done |
-| Next | Pi-hole / HA / UniFi / TP-Link switch collectors, ESP32 probes, reports, timeline, IPv6, rogue AP/DHCP checks | Not started |
+| Next | Pi-hole / HA / UniFi / TP-Link switch collectors, reports, timeline, IPv6, rogue AP/DHCP checks | Not started |
+| Probes | ESP32 probes: discovery, pairing, room, Wi-Fi scans, air monitor, alerts, channel plan (see 04-esp32-probes.md) | First version; probe sync and tests not yet |
 
 ## Rules for contributors
 

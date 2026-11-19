@@ -10,9 +10,10 @@ import time
 from typing import Any
 
 from . import config as config_mod
-from . import analysis, oui, secrets, topology, updater
+from . import analysis, channels, oui, secrets, topology, updater
 from .collectors.asus.collector import AsusCollector
 from .collectors.devolo import DevoloCollector
+from .collectors.probes import ProbeCollector
 from .discovery import Discovery
 from .hostpc import HostMonitor
 from .monitor import PingMonitor
@@ -29,6 +30,7 @@ class Engine:
         db.init(self.root / "meshlens.db")
         self.asus = AsusCollector(cfg.router, self.root)
         self.devolo = DevoloCollector(cfg.devolo, self.root)
+        self.probes = ProbeCollector(cfg.probes, self.root)
         self.discovery = Discovery(lambda: self.cfg, self.root)
         self.monitor = PingMonitor(cfg.monitor, self._ping_targets)
         self.host = HostMonitor()
@@ -44,6 +46,7 @@ class Engine:
         self.paused = False
         self.started = time.time()
         self._analysis: dict[float, tuple[float, dict[str, Any]]] = {}
+        self._channels: tuple[float, dict[str, Any]] | None = None
         self._lock = threading.Lock()
 
     # ------------------------------------------------------------ control
@@ -54,12 +57,14 @@ class Engine:
         threading.Thread(target=oui.load, name="oui-load", daemon=True).start()
         self.monitor.start()
         self.discovery.start()
+        self.probes.start()
 
     def stop(self) -> None:
         self._stop.set()
         self._wake.set()
         self.monitor.stop()
         self.discovery.stop()
+        self.probes.stop()
         if getattr(self, "advertiser", None):
             self.advertiser.stop()
         if self._thread:
@@ -75,6 +80,7 @@ class Engine:
             self.cfg = cfg
             self.asus.cfg = cfg.router
             self.devolo.cfg = cfg.devolo
+            self.probes.cfg = cfg.probes
             self.monitor.cfg = cfg.monitor
             self._analysis.clear()
 
@@ -87,7 +93,12 @@ class Engine:
                 return hit[1]
         since = now - hours * 3600
         net = {"unit_events": db.events(since, kinds=["radar", "channel_change", "channel_replan", "unit_reboot", "link_change",
-                                                     "wan_ip_change", "router_warning"], limit=5000),
+                                                     "wan_ip_change", "router_warning", "l2_loop", "probe_alert",
+                                                     "probe_deauths"], limit=5000),
+               "channel_plan": self.channels(), "probes": db.probes(),
+               "probe_clients": db.probe_clients_since(max(since, now - 3600)), "latest_stations": (latest := db.latest_stations()),
+               "band_history": db.band_history(now - 7 * 86400, [s["mac"] for s in latest
+                                                                 if s.get("band") == "2.4" and now - s["ts"] < 900]),
                "devices": db.devices(),
                "iface_counters": db.iface_counters_since(since), "units": db.units(),
                "unit_samples": db.unit_samples_since(since), "settings": db.latest_settings(), "host_lan": db.host_lan_since(since), "air": db.air_scan_since(max(since, now - 6 * 3600)),
@@ -96,10 +107,47 @@ class Engine:
                "plc_adapters": db.plc_adapters(), "plc_rates": db.plc_latest_rates(), "open_ports": db.open_ports(),
                "inventory": db.inventory_events(since), "monitor_cfg": self.cfg.monitor, "devolo_cfg": self.cfg.devolo}
         res = analysis.analyse(db.events(since, limit=200000), db.station_samples_since(since), db.latest_radio(),
-                               db.units(), db.devices(), db.latest_settings(), self.cfg.analysis, now, net=net)
+                               db.units(), db.devices(), db.latest_settings(), self.cfg.analysis, now, net=net,
+                               hidden=[(h["rule"], h["subject"]) for h in db.hidden_issues()])
         with self._lock:
             self._analysis[hours] = (now, res)
         return res
+
+    def set_issue_hidden(self, rule: str, subject: str, hidden: bool, title: str | None = None) -> None:
+        db.set_issue_hidden(rule, subject, hidden, title)
+        with self._lock:
+            self._analysis.clear()
+
+    def channels(self) -> dict[str, Any]:
+        """Channel plan (5 GHz blocks, 2.4 GHz 1/6/11) and radar incidents over 30 days (cached for 60 s)."""
+        now = time.time()
+        with self._lock:
+            if self._channels and now - self._channels[0] < 60:
+                return self._channels[1]
+        units = db.units()
+        unames: dict[str, str] = {}
+        skip: set[str] = set()
+        for u in units:
+            for m in [u["mac"], *(u.get("macs") or [])]:
+                unames[m] = u.get("alias") or u.get("model") or u["mac"]
+                skip.add(m)
+        from .names import display_name
+        dnames = {d["mac"]: display_name(d, d["mac"]) for d in db.devices()}
+        ue = db.events(now - 30 * 86400, kinds=["radar", "channel_change", "channel_replan"], limit=5000)
+        plan = channels.plan(db.air_scan_since(now - 24 * 3600), units, ue, now,
+                             probe_aps=db.probe_aps_since(now - 6 * 3600), probes=db.probes())
+        first = channels.radar_incidents(ue, [], None, unames)
+        latest = {s["mac"]: s for s in db.latest_stations()}
+        drops, moves = [], {}
+        for inc in first["incidents"][-20:]:
+            t0, t1 = inc["ts"], inc["until"]
+            drops += db.events(t0 - 10, kinds=["disconnect", "leave", "kick"], limit=2000, until=t1 + channels.AFTER_S)
+            moves[t0] = channels.band_moves_after(t0, db.station_samples_between(t0 - 600, t1 + 600), latest, skip, dnames,
+                                                 until=t1)
+        plan["radar"] = channels.radar_incidents(ue, drops, moves, unames)
+        with self._lock:
+            self._channels = (now, plan)
+        return plan
 
     def topology(self) -> dict[str, Any]:
         now = time.time()
@@ -268,6 +316,7 @@ class Engine:
                        "password_set": secrets.has_secret("asus", secrets.router_ident(r.username, r.host, r.port))},
             "asus": self.asus.status,
             "devolo": self.devolo.status,
+            "probes": self.probes.status,
             "discovery": self.discovery.status,
             "speedtest": {"running": self.speed_status["running"], "router_running": self.speed_status["router_running"],
                           "router_enabled": self.cfg.monitor.router_speedtest},
@@ -314,6 +363,11 @@ class Engine:
                         self.devolo.poll()
                     except Exception:
                         log.exception("devolo poll crashed")
+                if self.probes.due(time.time()):
+                    try:
+                        self.probes.poll()
+                    except Exception:
+                        log.exception("probe poll crashed")
                 m = self.cfg.monitor
                 if m.speedtest_hours and time.time() - last_speed > m.speedtest_hours * 3600:
                     last_speed = time.time()

@@ -63,23 +63,73 @@ def which_tools(text: str) -> set[str]:
     return present
 
 
-def chip_family(tools: set[str]) -> str:
+def chip_family(tools: set[str], wl_ifnames: str = "") -> str:
+    """Wi-Fi chip family from the tools present, else from the radio interface names (``wl_ifnames``).
+
+    Older MediaTek firmware (e.g. RT-AX57 Go) has neither ``mwctl`` nor ``iw``; its radios are still ra*/rax*.
+    """
     if "mwctl" in tools:
         return "mediatek"
     if "wlanconfig" in tools or "cfg80211tool" in tools:
         return "qualcomm"
     if "wl" in tools:
         return "broadcom"
+    names = wl_ifnames.split()
+    if any(re.fullmatch(r"ra[ix]?\d+", n) for n in names):
+        return "mediatek"
+    if any(re.fullmatch(r"(ath|wifi)\d+", n) for n in names):
+        return "qualcomm"
+    if any(re.fullmatch(r"(eth|wl)\d+(\.\d+)?", n) for n in names):
+        return "broadcom"
     return "unknown"
 
 
 # ---------------------------------------------------------------- interfaces
 
+# Default for the tri-band BT8 (ra = 2.4, rai = 5, rax = 6). Dual-band MediaTek units name their 5 GHz radio rax
+# (RT-AX57 Go: wl_ifnames "ra0 rax0"), so prefer iface_band_map() built from the unit's own wl_ifnames.
 _BAND_BY_PREFIX = [("rax", "6"), ("rai", "5"), ("ra", "2.4"), ("apclix", "6"), ("apclii", "5"), ("apcli", "2.4")]
+_APCLI = {"ra": "apcli", "rai": "apclii", "rax": "apclix"}
 
 
-def band_of_iface(iface: str) -> str | None:
-    """Band of an interface name: MediaTek ra*/rai*/rax*, Qualcomm ath0*/ath1*."""
+def band_of_freq(mhz: float | int | None) -> str | None:
+    """Band from a centre frequency in MHz."""
+    if not mhz:
+        return None
+    if 2400 <= mhz < 2500:
+        return "2.4"
+    if 4900 <= mhz < 5925:
+        return "5"
+    if 5925 <= mhz <= 7125:
+        return "6"
+    return None
+
+
+def iface_band_map(identity: dict[str, str] | None) -> dict[str, str]:
+    """MediaTek prefix -> band from the unit's own radio list (``wl_ifnames``, in wl0, wl1, wl2 order).
+
+    wl0 is 2.4 GHz, wl1 5 GHz; a third radio is 6 GHz (BT8). The station (backhaul) interface of each radio
+    follows it: ra -> apcli, rai -> apclii, rax -> apclix.
+    """
+    names = ((identity or {}).get("wl_ifnames") or "").split()
+    out: dict[str, str] = {}
+    for idx, n in enumerate(names):
+        m = re.fullmatch(r"(ra[ix]?)\d+", n)
+        if not m:
+            continue
+        band = ("2.4", "5", "6")[idx] if idx < 3 else None
+        if band:
+            out[m.group(1)] = band
+            out[_APCLI[m.group(1)]] = band
+    return out
+
+
+def band_of_iface(iface: str, bands: dict[str, str] | None = None) -> str | None:
+    """Band of an interface name: MediaTek ra*/rai*/rax* (per ``bands`` when known), Qualcomm ath0*/ath1*."""
+    if bands:
+        m = re.match(r"(apcli[ix]?|ra[ix]?)\d", iface)
+        if m and m.group(1) in bands:
+            return bands[m.group(1)]
     for prefix, band in _BAND_BY_PREFIX:
         if iface.startswith(prefix):
             return band
@@ -89,15 +139,15 @@ def band_of_iface(iface: str) -> str | None:
     return None
 
 
-def parse_iw_dev(text: str) -> list[dict[str, Any]]:
-    """``iw dev``: interfaces with type, ssid, channel, width, tx power."""
+def parse_iw_dev(text: str, bands: dict[str, str] | None = None) -> list[dict[str, Any]]:
+    """``iw dev``: interfaces with type, ssid, channel, width, tx power (band from the frequency when shown)."""
     out: list[dict[str, Any]] = []
     cur: dict[str, Any] | None = None
     for line in text.splitlines():
         s = line.strip()
         m = re.match(r"Interface (\S+)", s)
         if m:
-            cur = {"iface": m.group(1), "band": band_of_iface(m.group(1))}
+            cur = {"iface": m.group(1), "band": band_of_iface(m.group(1), bands)}
             out.append(cur)
             continue
         if cur is None:
@@ -112,6 +162,7 @@ def parse_iw_dev(text: str) -> list[dict[str, Any]]:
             m = re.match(r"channel (\d+) \((\d+) MHz\), width: (\d+) MHz", s)
             if m:
                 cur["channel"], cur["freq"], cur["width"] = int(m.group(1)), int(m.group(2)), int(m.group(3))
+                cur["band"] = band_of_freq(cur["freq"]) or cur["band"]
         elif s.startswith("txpower "):
             cur["txpower_dbm"] = float(s.split()[1])
     return out
@@ -505,14 +556,55 @@ def parse_mwctl_stat(text: str) -> dict[str, Any]:
     return out
 
 
-def parse_iwconfig(text: str) -> list[dict[str, Any]]:
-    """``iwconfig``: per interface signal / noise (Qualcomm backhaul and radios)."""
+def parse_mac_table(text: str, iface: str, bands: dict[str, str] | None = None) -> list[dict[str, Any]]:
+    """Older MediaTek ``iwpriv <radio> get_mac_table`` (units without mwctl / hostapd_cli, e.g. RT-AX57 Go).
+
+    The column set differs between driver versions, so the header row decides what each column is: MAC, AID,
+    RSSI0..RSSIn (the strongest chain is used), Idle (seconds), Rate/TxRate (Mbit/s). UNVERIFIED on a real unit:
+    the collector also keeps the raw output (``raw_unparsed`` in the daily JSON Lines) so the format can be checked.
+    """
+    head: list[str] | None = None
+    out: list[dict[str, Any]] = []
+    for line in text.splitlines():
+        toks = line.split()
+        if not toks:
+            continue
+        if toks[0].upper() == "MAC" and len(toks) > 2:
+            head = [t.upper() for t in toks]
+            continue
+        if head is None or not re.fullmatch(MAC_RE, toks[0]):
+            continue
+        row = dict(zip(head, toks))
+        rssis = []
+        for k, v in row.items():
+            if k.startswith("RSSI") and re.fullmatch(r"-\d+", v) and int(v) < 0:
+                rssis.append(int(v))
+        st: dict[str, Any] = {"mac": norm_mac(toks[0]), "iface": iface, "band": band_of_iface(iface, bands),
+                              "rssi": max(rssis) if rssis else None, "source": "iwpriv"}
+        for key in ("TXRATE", "RATE", "LASTTXRATE"):
+            if re.fullmatch(r"\d+(\.\d+)?", row.get(key, "")):
+                st["tx_rate"] = float(row[key])
+                break
+        if re.fullmatch(r"\d+(\.\d+)?", row.get("RXRATE", "")):
+            st["rx_rate"] = float(row["RXRATE"])
+        if re.fullmatch(r"\d+", row.get("IDLE", "")):
+            st["inactive_msec"] = int(row["IDLE"]) * 1000
+        if row.get("BW"):
+            m = re.match(r"(\d+)", row["BW"])
+            if m:
+                st["width"] = int(m.group(1))
+        out.append(st)
+    return out
+
+
+def parse_iwconfig(text: str, bands: dict[str, str] | None = None) -> list[dict[str, Any]]:
+    """``iwconfig``: per interface signal / noise / bit rate, and the band from ``Frequency`` when shown."""
     out: list[dict[str, Any]] = []
     cur: dict[str, Any] | None = None
     for line in text.splitlines():
         if line and not line[0].isspace():
             name = line.split()[0]
-            cur = {"iface": name, "band": band_of_iface(name)}
+            cur = {"iface": name, "band": band_of_iface(name, bands)}
             out.append(cur)
             m = re.search(r'ESSID:"([^"]*)"', line)
             if m:
@@ -525,6 +617,13 @@ def parse_iwconfig(text: str) -> list[dict[str, Any]]:
         m = re.search(r"Bit Rate[:=]([\d.]+) (\w)b/s", line)
         if m:
             cur["bitrate_mbps"] = float(m.group(1)) * (1000 if m.group(2) == "G" else 1)
+        m = re.search(r"Frequency[:=]([\d.]+) GHz", line)
+        if m:
+            cur["freq"] = round(float(m.group(1)) * 1000)
+            cur["band"] = band_of_freq(cur["freq"]) or cur["band"]
+        m = re.search(r"Channel[:=](\d+)", line)
+        if m:
+            cur["channel"] = int(m.group(1))
     return [i for i in out if len(i) > 2]
 
 
@@ -580,7 +679,8 @@ def _event_time(line: str, now: datetime) -> float | None:
     return time.mktime(dt.timetuple())
 
 
-def parse_log_events(text: str, unit: str, now: datetime | None = None) -> list[dict[str, Any]]:
+def parse_log_events(text: str, unit: str, now: datetime | None = None,
+                     bands: dict[str, str] | None = None) -> list[dict[str, Any]]:
     """Wi-Fi events from syslog lines (MediaTek and Qualcomm units share hapdevent/roamast)."""
     now = now or datetime.now()
     out = []
@@ -612,7 +712,7 @@ def parse_log_events(text: str, unit: str, now: datetime | None = None) -> list[
             out.append({
                 "ts": ts, "unit": unit, "kind": kind,
                 "mac": norm_mac(g["mac"]) if "mac" in g else None,
-                "iface": iface, "band": band_of_iface(iface) if iface else None,
+                "iface": iface, "band": band_of_iface(iface, bands) if iface else None,
                 "detail": detail,
                 "raw_hash": hashlib.sha1(line.strip().encode()).hexdigest(),
             })

@@ -91,6 +91,18 @@ class DevoloCollector:
 
     def store(self, ov: dict[str, Any], now: float) -> None:
         db.store_plc(ov["devices"], ov["rates"], now)
+        try:
+            clients = {s["mac"]: s["unit"] for s in db.latest_stations() if now - s["ts"] <= 600}
+            found = loop_evidence(ov["devices"], clients, db.units(), now)
+            if found:
+                import hashlib
+                import json
+                db.insert_events([{"ts": now, "unit": f["adapter"], "kind": "l2_loop", "mac": None, "iface": None,
+                                   "detail": f, "raw_hash": hashlib.sha1(json.dumps([now, f], sort_keys=True).encode()).hexdigest()}
+                                  for f in found])
+                log.warning("possible network loop behind powerline: %s", found)
+        except Exception:  # never let the check break powerline collection
+            log.exception("loop check failed")
         for a in ov["devices"]:
             # The adapters are LAN devices too; give them their devolo names.
             if db.device(a["mac"]):
@@ -98,6 +110,49 @@ class DevoloCollector:
                 if a.get("name"):
                     db.merge_names(a["mac"], {"devolo": a["name"]})
         jsonl.append(self.data_root, {"type": "devolo", "ts": now, **ov})
+
+
+def loop_evidence(adapters: list[dict[str, Any]], wifi_clients: dict[str, str], units: list[dict[str, Any]],
+                  now: float | None = None) -> list[dict[str, Any]]:
+    """Signs of a second path (a loop) behind a powerline adapter that isn't the one wired to the router.
+
+    - the main router's own addresses seen behind it (the router is upstream, so they should only appear behind
+      the router-side adapter);
+    - devices that are Wi-Fi clients of a unit *not* behind that adapter seen behind it (their traffic is coming
+      back round through the wired side);
+    - a mesh node behind it that is also linked to the mesh over Wi-Fi (two paths unless AiMesh has switched its
+      wireless backhaul off).
+    """
+    now = now or time.time()
+    router = next((u for u in units if u.get("role") == "router"), None)
+    router_macs = set([router["mac"], *(router.get("macs") or [])]) if router else set()
+    unit_of: dict[str, str] = {}
+    for u in units:
+        for m in [u["mac"], *(u.get("macs") or [])]:
+            unit_of[m] = u["mac"]
+    names = {u["mac"]: u.get("alias") or u.get("model") or u["mac"] for u in units}
+    out = []
+    for a in adapters:
+        if a.get("attached_to_router"):
+            continue
+        bridged = {_mac(b) for b in a.get("bridged") or []}
+        # Units legitimately behind this adapter (their own clients' traffic passes it). Never the router: it is
+        # upstream of every non-router adapter, so its addresses here are themselves the sign of a loop.
+        units_here = {unit_of[m] for m in bridged if m in unit_of and m not in router_macs}
+        r = sorted(bridged & router_macs)
+        w = sorted(m for m in bridged if m in wifi_clients and wifi_clients[m] not in units_here and m not in unit_of)
+        nodes = []
+        for u in units:
+            if u["mac"] in units_here and u.get("role") != "router":
+                live = [b for b in u.get("backhaul") or [] if now - (b.get("ts") or 0) <= 900]
+                if live:
+                    nodes.append({"unit": u["mac"], "name": names[u["mac"]],
+                                  "wifi_backhaul": [f"{b.get('band')} GHz" for b in live]})
+        if r or w or nodes:
+            out.append({"adapter": a["mac"], "adapter_name": a.get("name") or a.get("product") or a["mac"],
+                        "router_macs": r, "wifi_clients": w[:20], "wifi_client_units": sorted({names.get(wifi_clients[m], wifi_clients[m]) for m in w}),
+                        "nodes": nodes})
+    return out
 
 
 def links(adapters: list[dict[str, Any]], rates: list[dict[str, Any]]) -> list[dict[str, Any]]:
