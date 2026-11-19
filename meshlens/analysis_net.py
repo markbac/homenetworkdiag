@@ -42,6 +42,44 @@ def _hm(ts: float) -> str:
     return time.strftime("%d %b %H:%M", time.localtime(ts))
 
 
+KEY_PORTS = {53: "DNS server", 445: "file server", 2049: "file server", 8123: "Home Assistant", 1883: "MQTT broker",
+             5000: "NAS", 5001: "NAS", 32400: "media server"}
+KEY_TYPES = ("nas", "server", "network", "powerline", "switch", "router", "hub", "gateway")
+
+
+def key_device_suggestions(devices: list[dict[str, Any]], open_ports: list[dict[str, Any]], now: float | None = None,
+                           units: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+    """Devices the rest of the house depends on (servers, switches, hubs, powerline) that aren't watched yet.
+
+    One entry per host name: a device on cable and Wi-Fi is suggested once, on its wired address. Computers, phones
+    and TVs are never suggested (Windows file sharing doesn't make a PC a server); mesh units are watched already;
+    a device only typed as a server/hub must be on a cable."""
+    now = now or time.time()
+    unit_macs = {m for u in units or [] for m in [u["mac"], *(u.get("macs") or [])]}
+    ports: dict[str, set[int]] = defaultdict(set)
+    for p in open_ports:
+        ports[p["mac"]].add(p["port"])
+    out, seen_names = [], set()
+    for d in sorted(devices, key=lambda d: (not d.get("wired"), d["mac"])):
+        if d.get("randomised") or not d.get("last_seen") or now - d["last_seen"] > 7 * 86400:
+            continue
+        kind = (d.get("user_type") or d.get("dtype") or "").lower()
+        if d["mac"] in unit_macs or (d.get("name") or "").startswith(("ZenWiFi", "RT-", "GT-")) or any(
+                k in kind for k in ("computer", "phone", "tablet", "laptop", "tv", "streamer", "console")):
+            continue
+        server = "nas" in kind or "server" in kind
+        roles = sorted({KEY_PORTS[p] for p in ports.get(d["mac"], ()) if p in KEY_PORTS and (server or p not in (445, 2049))})
+        if not roles and not (d.get("wired") and any(k in kind for k in KEY_TYPES)):
+            continue
+        name = display_name(d, d["mac"])
+        if name.lower() in seen_names or any(x.get("watched") and display_name(x, x["mac"]).lower() == name.lower() for x in devices):
+            continue
+        seen_names.add(name.lower())
+        if not d.get("watched"):
+            out.append({"mac": d["mac"], "name": name, "why": ", ".join(roles) or kind})
+    return out
+
+
 def net_issues(net: dict[str, Any], devs: dict[str, dict[str, Any]], now: float) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
 
@@ -608,6 +646,17 @@ def net_issues(net: dict[str, Any], devs: dict[str, dict[str, Any]], now: float)
                 "The router's device database guesses names from the first half of the address and sometimes picks an ASUS "
                 "product name for another maker's chip (Espressif, used in many smart plugs and lights).",
                 ["Give it a proper name in Devices so its issues make sense."]))
+
+    # ------------------------------------------------ key devices nobody is watching
+    sugg = key_device_suggestions(net.get("devices") or [], net.get("open_ports") or [], now, net.get("units"))
+    if sugg:
+        out.append(_issue(
+            "watch_suggest", "info", "network", "watch-suggest", f"Watch {len(sugg)} key device{'s' if len(sugg) > 1 else ''}",
+            "Not watched yet: " + "; ".join(f"{x['name']} ({x['why']})" for x in sugg[:10]) + ".",
+            "These devices are ones the rest of the house relies on (DNS, file and media servers, Home Assistant, switches, "
+            "powerline adapters). Watched devices are pinged every few seconds and you get an issue when one goes offline, "
+            "so an outage like a DNS server dropping off is caught at once.",
+            ["Settings → Setup checklist → 'Watch suggested', or open each device and tick Watch."]))
 
     # ------------------------------------------------ ESP32 probes
     plist = net.get("probes") or []

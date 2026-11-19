@@ -62,6 +62,11 @@ def build_app(engine: Engine, auth: Auth) -> web.Application:
     r.add_get("/api/topology", topology_get)
     r.add_get("/api/channels", channels_get)
     r.add_get("/api/issues/hidden", hidden_get)
+    r.add_get("/api/checklist", checklist_get)
+    r.add_post("/api/devices/watch", devices_watch)
+    r.add_get("/api/changes", changes_get)
+    r.add_post("/api/changes", change_add)
+    r.add_post("/api/changes/{cid:\\d+}/delete", change_delete)
     r.add_get("/api/probes", probes_get)
     r.add_post("/api/probes/add", probe_add)
     r.add_post("/api/probes/{pid}/{action:(pair|confirm|placement|forget)}", probe_action)
@@ -355,6 +360,50 @@ async def probe_action(request: web.Request) -> web.Response:
             eng._analysis.clear()
             eng._channels = None
     return web.json_response(res, status=200 if res.get("ok") else 400)
+
+
+async def checklist_get(request: web.Request) -> web.Response:
+    return web.json_response(await asyncio.to_thread(request.app[ENGINE].checklist))
+
+
+async def devices_watch(request: web.Request) -> web.Response:
+    """Watch (or stop watching) several devices at once: {"macs": [...], "watched": bool}."""
+    body = await request.json()
+    macs = [str(m).lower() for m in body.get("macs") or []][:200]
+    n = sum(1 for m in macs if db.update_enrichment(m, watched=1 if body.get("watched", True) else 0))
+    eng = request.app[ENGINE]
+    with eng._lock:
+        eng._analysis.clear()
+    return web.json_response({"ok": True, "changed": n})
+
+
+async def changes_get(request: web.Request) -> web.Response:
+    eng = request.app[ENGINE]
+
+    def go():
+        out = db.changes(time.time() - 90 * 86400)
+        for c in out[:10]:
+            c["impact"] = eng.change_impact(c["ts"])
+        return out
+    return web.json_response(await asyncio.to_thread(go))
+
+
+async def change_add(request: web.Request) -> web.Response:
+    body = await request.json()
+    note = str(body.get("note") or "").strip()[:200]
+    if not note:
+        return web.json_response({"error": "say what you changed"}, status=400)
+    try:
+        ts = float(body.get("ts") or time.time())
+    except (TypeError, ValueError):
+        ts = time.time()
+    ts = min(ts, time.time())
+    return web.json_response({"ok": True, "id": db.add_change(ts, note)})
+
+
+async def change_delete(request: web.Request) -> web.Response:
+    db.delete_change(int(request.match_info["cid"]))
+    return web.json_response({"ok": True})
 
 
 async def hidden_get(request: web.Request) -> web.Response:

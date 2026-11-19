@@ -138,6 +138,108 @@
   off. MeshLens only scans inside your home network.</p>
 <h3 id="issue-new_open_port">New open port</h3><p>A device started offering a service it didn't before: an update, a setting or new software.</p>
 
+<h2 id="howto">How to change it (ASUS)</h2>
+<p>Exact steps for the fixes MeshLens suggests. MeshLens never changes your router; you do. Menu names are from the ASUS web
+  interface (open your router's address in a browser, or <code>http://www.asusrouter.com</code> from a device on your network) on
+  firmware 3.0.0.6; the ASUS app has the same settings under <i>Settings</i>. Names vary a little between firmware versions.
+  After changing anything, use <b>Mark a change</b> (Overview) so MeshLens can show you whether it helped.</p>
+
+<h3 id="howto-fixed-channel">Set a fixed 5 GHz channel (avoid radar / DFS)</h3>
+<ol><li>Advanced Settings → <b>Wireless</b> → <b>General</b>.</li>
+  <li>If <i>Smart Connect</i> is on, choose the <b>5 GHz</b> band in the band list (or the 5 GHz tab).</li>
+  <li><b>Control Channel</b>: pick 36, 40, 44 or 48 (the Channel plan says which block is best), <i>or</i> leave Auto and
+    <b>untick "Auto select channel including DFS channels"</b>.</li>
+  <li><b>Channel bandwidth</b>: 80 MHz (160 MHz needs radar channels).</li>
+  <li><b>Apply</b>. 5 GHz restarts for under a minute; the nodes follow the router.</li></ol>
+<p>In the ASUS app: Settings → WiFi → Wireless Settings → 5 GHz → Control channel / Auto channel options.</p>
+
+<h3 id="howto-24-channel">Set the 2.4 GHz channel and width</h3>
+<ol><li>Wireless → General → <b>2.4 GHz</b>.</li>
+  <li><b>Control Channel</b>: 1, 6 or 11 only (any other overlaps two of them). Use the one the Channel plan marks best.</li>
+  <li><b>Channel bandwidth</b>: 20 MHz (40 MHz takes two-thirds of the band and collides with neighbours).</li>
+  <li><b>Apply</b>.</li></ol>
+
+<h3 id="howto-smart-connect">Smart Connect rule (band steering)</h3>
+<ol><li>Wireless → General: with Smart Connect enabled, click <b>Smart Connect Rule</b>.</li>
+  <li>Under <i>STA Selection Policy</i> for 2.4 GHz, find the condition that steers to 5 GHz (an RSSI "greater than" value).</li>
+  <li>If it is about -52 dBm, devices a room or two away never qualify. Lower it to about <b>-68 dBm</b>, in steps of 5 dB.</li>
+  <li><b>Apply</b>, then watch the "stuck on 2.4 GHz" issue and the device's band timeline. Too low a value makes devices bounce.</li></ol>
+<p>Some firmware hides the rule unless Smart Connect is on; if you don't want to change it, reconnecting the device's Wi-Fi also
+  puts it back on 5 GHz.</p>
+
+<h3 id="howto-bind">Bind a device to one unit</h3>
+<ol><li><b>Network Map</b> → <b>Clients</b> (or AiMesh → the unit → <i>Clients</i>).</li>
+  <li>Click the device, then the <b>Bind</b> / <i>AiMesh preferred node</i> option, and choose the unit nearest to it.</li>
+  <li>Apply. The device can still connect elsewhere if that unit is down.</li></ol>
+<p>In the ASUS app: Devices → the device → <i>Bind to AiMesh node</i>. Use this for TVs, speakers and smart-home hubs that never move,
+  and for devices that wander onto the outdoor unit.</p>
+
+<h3 id="howto-pmf">Set Protected Management Frames (PMF) the same everywhere</h3>
+<ol><li>Wireless → <b>Professional</b>.</li>
+  <li>For each band, <b>Protected Management Frames</b>: <b>Capable</b> suits a mix of new and old devices (WPA2/WPA3). <i>Required</i>
+    locks out older devices; <i>Disable</i> weakens WPA3.</li>
+  <li>Apply on the main router. Nodes copy it when they sync; if a node keeps a different value, restart it or update its firmware.</li>
+  <li>6 GHz always requires PMF; that's normal.</li></ol>
+
+<h3 id="howto-firmware">Update firmware on every unit</h3>
+<ol><li><b>Administration</b> → <b>Firmware Upgrade</b> → <i>Check</i>. The list includes every AiMesh node.</li>
+  <li>Update the router and each node (nodes update from the same page). Each one restarts.</li>
+  <li>Mark a change in MeshLens; the firmware issue clears at the next full poll (15 minutes).</li></ol>
+
+<h3 id="howto-one-path">Remove a network loop</h3>
+<ol><li>Find the switch or powerline adapter named in the issue.</li>
+  <li>Make sure the wired devices there reach the router <b>one way only</b>: either through the powerline adapter <i>or</i> through
+    a mesh node / wireless bridge, not both.</li>
+  <li>Unplug the extra cable, wait two minutes, and check ping loss to the router (Graphs) is back under 1%.</li></ol>
+
+<h3 id="howto-ethernet-backhaul">Use a cable or powerline as a node's backhaul</h3>
+<ol><li>Plug the cable into the node's <b>WAN / uplink</b> port (not a LAN port).</li>
+  <li>AiMesh → the node → <i>Management</i> → <b>Backhaul connection priority</b>: Ethernet first (or turn on
+    <i>Ethernet backhaul mode</i> on the AiMesh page if every node is cabled).</li>
+  <li>The node stops using Wi-Fi to reach the router, which frees airtime and avoids two paths.</li></ol>
+<p>The same page has <b>Preferable uplink AP</b>: set it to pin a node (e.g. an outdoor one) to a particular parent.</p>
+
+<h3 id="howto-roaming">Roaming assistant threshold</h3>
+<ol><li>Wireless → Professional → choose the band.</li>
+  <li><b>Roaming assistant</b>: Enable, <i>Disconnect clients with RSSI lower than</i> about <b>-75 dBm</b>.</li>
+  <li>Higher values (e.g. -65) kick devices that still have a usable signal, which causes kick loops.</li></ol>
+
+<h3 id="howto-igmp">IGMP snooping</h3>
+<ol><li><b>LAN</b> → <b>IPTV</b> → <i>Enable IGMP Snooping</i> → Apply.</li>
+  <li>Check casting (Chromecast, AirPlay) and Sonos still work; if not, turn it off again.</li></ol>
+
+<h3 id="howto-qos">Turn on QoS (bufferbloat)</h3>
+<ol><li><b>Adaptive QoS</b> → <b>QoS</b> → Enable. Type: Adaptive or Traditional.</li>
+  <li>Bandwidth: about 90% of your plan (for 900/100 Mbit/s: about 810 down / 90 up).</li>
+  <li>Run a speed test in MeshLens (Tests tab) and compare the bufferbloat grade. Only needed if the router's own line shows bloat:
+    bloat that vanished when this PC's path changed was the path, not the line.</li></ol>
+
+<h3 id="howto-pi-wifi-off">Turn off Wi-Fi on a Raspberry Pi that has a cable</h3>
+<ol><li>On the Pi: <code>sudo nano /boot/firmware/config.txt</code> (older systems: <code>/boot/config.txt</code>).</li>
+  <li>Add a line <code>dtoverlay=disable-wifi</code>, save, and reboot.</li>
+  <li>Or, to keep it for later: <code>sudo nmcli radio wifi off</code>. Check MeshLens shows only the wired address within 30 minutes.</li></ol>
+
+<h3 id="howto-watch">Watch key devices</h3>
+<p>Settings → Setup checklist → <b>Watch suggested</b>, or open a device and tick <i>Watch</i>. Watched devices are pinged every few
+  seconds (Graphs → latency) and raise an issue when offline for longer than the threshold in Settings → Analysis.</p>
+
+<h2 id="glossary">Glossary</h2>
+<dl class="glossary">
+  <dt>Backhaul</dt><dd>The link a mesh node uses to reach the router: Wi-Fi (a hidden network between units), a cable or powerline.</dd>
+  <dt>Band steering / Smart Connect</dt><dd>The mesh moving dual-band devices between 2.4, 5 and 6 GHz by rules on signal and load.</dd>
+  <dt>BSS Load</dt><dd>A field in an access point's beacons saying how busy its channel is and how many devices it has.</dd>
+  <dt>Bufferbloat</dt><dd>Lag when the line is busy: packets wait in over-full queues. Graded A (none) to F.</dd>
+  <dt>DFS / radar channels</dt><dd>5 GHz channels 52-144, shared with radar. A unit that hears radar must leave at once and check the new channel first.</dd>
+  <dt>dBm (signal)</dt><dd>Signal strength: -50 is excellent, -65 good, -72 the edge, below -80 barely usable. Closer to zero is stronger.</dd>
+  <dt>Kick</dt><dd>The roaming assistant disconnecting a device with a weak signal so it reconnects to a closer unit.</dd>
+  <dt>Loop</dt><dd>Two paths between the same parts of the network; traffic circulates and switches lose track of devices.</dd>
+  <dt>PMF</dt><dd>Protected Management Frames: protects disconnect and roaming messages from forgery. Part of WPA3.</dd>
+  <dt>PMKID</dt><dd>A saved key a WPA3/WPA2 device reuses to rejoin quickly. Status 53 means a unit didn't accept it.</dd>
+  <dt>Powerline</dt><dd>Network over the house's mains wiring (devolo). Speed depends on the wiring between the two sockets.</dd>
+  <dt>Probe</dt><dd>An ESP32 board that listens to the Wi-Fi in one room and reports to MeshLens.</dd>
+  <dt>Roam</dt><dd>A device moving from one unit to another.</dd>
+</dl>
+
 <h2 id="phone">Using MeshLens on your phone</h2>
 <p>Press <b>📱 Phone</b> at the top of the dashboard on the PC and point your phone's camera at the QR code. The phone must be on
   the home Wi-Fi (not mobile data or the guest network). The dialog also lists every address that works:</p>
@@ -279,6 +381,22 @@
 <h3 id="issue-qos_off">QoS off while bufferbloat is high</h3><p>Turn on Adaptive QoS with the bandwidth set to about 90% of the router speed
   test's results; that keeps games and calls responsive while someone uploads or downloads.</p>
 
+<h3 id="checklist">Setup checklist</h3>
+<p>Settings → Setup checklist lists what MeshLens needs to see the whole network: the router login, every unit readable, your
+  internet plan's speed, key devices watched, powerline adapters, probes paired and placed. Unfinished items also show on the
+  Overview. Optional items show a dash.</p>
+<h3 id="changes">Changes you made (before and after)</h3>
+<p>Press <b>Mark a change</b> on the Overview whenever you change something (a channel, a cable, a setting) and say what it was.
+  MeshLens draws a marker on every graph and, under Settings → Changes you made, compares equal windows before and after (up to
+  24 hours each side): ping loss and spikes to the router and the internet, Wi-Fi disconnects, devices on 2.4 GHz, and this PC's
+  speed tests. "Better" / "worse" only compares the numbers; give it a day before judging.</p>
+<h3 id="issue-status">New, ongoing and resolved issues</h3>
+<p>An issue is <b>new</b> for its first day. Issues look back 24 hours, so one counts as <b>resolved</b> once it hasn't been seen for a
+  day; the Analysis tab lists issues resolved in the last 7 days. Repeated issues for the same device are shown once with a count
+  (×N) and the times. Info-level issues aren't tracked.</p>
+<h3 id="band-timeline">Where it was connected (unit and band)</h3>
+<p>On a Wi-Fi device's page, under Graphs: which unit and band (2.4 / 5 / 6 GHz) it used over the chosen period, from the router's polls.
+  A long stretch on 2.4 GHz for a device that normally uses 5 GHz is the "stuck on 2.4 GHz" problem.</p>
 <h3 id="channel-plan">Channel plan</h3>
 <p>On the main router's page and on This PC, MeshLens scores each 5 GHz 80 MHz block (36-48, 52-64, 100-112, 116-128, 132-144,
   149-161) and the 2.4 GHz channels 1, 6 and 11. The score adds up: strong neighbours (heard louder than -70 dBm by this PC),

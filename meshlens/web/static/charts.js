@@ -64,6 +64,12 @@ const Charts = (() => {
       s += `<line x1="${L}" x2="${W - R}" y1="${yy}" y2="${yy}" stroke="${css("--line")}"/><text x="${L - 6}" y="${yy + 4}" text-anchor="end" class="ax">${fmtV(v, "")}</text>`;
     }
     for (let i = 0; i <= 5; i++) { const t = t0 + (span * i) / 5; s += `<text x="${x(t)}" y="${H - 6}" text-anchor="middle" class="ax">${e(fmtT(t, span))}</text>`; }
+    // Changes the user marked (Settings → Changes you made), on every time chart.
+    for (const m of (opts.marks || (typeof MESHLENS_MARKS !== "undefined" ? MESHLENS_MARKS : []))) {
+      if (m.t < t0 || m.t > t1) continue;
+      s += `<line x1="${x(m.t)}" x2="${x(m.t)}" y1="${T}" y2="${H - B}" stroke="${css("--accent")}" stroke-dasharray="3 3"><title>${e(m.label)}</title></line>`
+        + `<text x="${x(m.t) + 3}" y="${T + 10}" class="ax mark">▼ ${e(String(m.label).slice(0, 24))}</text>`;
+    }
     for (const r of opts.refLines || []) {
       if (r.y < lo || r.y > hi) continue;
       s += `<line x1="${L}" x2="${W - R}" y1="${y(r.y)}" y2="${y(r.y)}" stroke="${css(r.color || "--warn")}" stroke-dasharray="5 4"/><text x="${W - R - 4}" y="${y(r.y) - 4}" text-anchor="end" class="ax">${e(r.label)}</text>`;

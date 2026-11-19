@@ -162,6 +162,16 @@ CREATE TABLE IF NOT EXISTS probe_clients (
 );
 CREATE INDEX IF NOT EXISTS probe_clients_ts ON probe_clients(ts);
 
+CREATE TABLE IF NOT EXISTS issue_log (
+  rule TEXT, subject TEXT, title TEXT, severity TEXT,
+  first_seen REAL, last_seen REAL, resolved_at REAL,
+  PRIMARY KEY (rule, subject)
+);
+
+CREATE TABLE IF NOT EXISTS changes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL, note TEXT
+);
+
 CREATE TABLE IF NOT EXISTS hidden_issues (
   rule TEXT, subject TEXT, hidden_at REAL, title TEXT,
   PRIMARY KEY (rule, subject)
@@ -733,3 +743,55 @@ def probe_aps_since(since: float) -> list[dict[str, Any]]:
 
 def probe_clients_since(since: float) -> list[dict[str, Any]]:
     return _rows(conn().execute("SELECT * FROM probe_clients WHERE ts >= ? ORDER BY ts", (since,)))
+
+
+# ---------------------------------------------------------------- issue history (new / ongoing / resolved)
+
+def log_issues(current: list[dict[str, Any]], now: float) -> dict[tuple[str, str], dict[str, Any]]:
+    """Record which issues are present now; mark ones that disappeared as resolved. Returns the log by key."""
+    keys = {(i["rule"], str(i.get("subject"))): i for i in current if i["severity"] != "info"}
+    with _write_lock:
+        c = conn()
+        for (rule, subj), i in keys.items():
+            c.execute("""INSERT INTO issue_log(rule, subject, title, severity, first_seen, last_seen, resolved_at)
+                         VALUES (?, ?, ?, ?, ?, ?, NULL)
+                         ON CONFLICT(rule, subject) DO UPDATE SET title = excluded.title, severity = excluded.severity,
+                           last_seen = excluded.last_seen,
+                           first_seen = CASE WHEN issue_log.resolved_at IS NOT NULL THEN excluded.first_seen ELSE issue_log.first_seen END,
+                           resolved_at = NULL""", (rule, subj, i["title"], i["severity"], now, now))
+        for rule, subj in [tuple(r) for r in c.execute("SELECT rule, subject FROM issue_log WHERE resolved_at IS NULL")]:
+            if (rule, subj) not in keys:
+                c.execute("UPDATE issue_log SET resolved_at = ? WHERE rule = ? AND subject = ?", (now, rule, subj))
+        c.execute("DELETE FROM issue_log WHERE resolved_at IS NOT NULL AND resolved_at < ?", (now - 30 * 86400,))
+        c.commit()
+    return {(r["rule"], r["subject"]): r for r in _rows(conn().execute("SELECT * FROM issue_log"))}
+
+
+def resolved_issues(since: float) -> list[dict[str, Any]]:
+    return _rows(conn().execute("SELECT * FROM issue_log WHERE resolved_at >= ? ORDER BY resolved_at DESC", (since,)))
+
+
+# ---------------------------------------------------------------- changes the user marked
+
+def add_change(ts: float, note: str) -> int:
+    with _write_lock:
+        c = conn()
+        cur = c.execute("INSERT INTO changes(ts, note) VALUES (?, ?)", (ts, note))
+        c.commit()
+        return int(cur.lastrowid)
+
+
+def changes(since: float = 0) -> list[dict[str, Any]]:
+    return _rows(conn().execute("SELECT * FROM changes WHERE ts >= ? ORDER BY ts DESC", (since,)))
+
+
+def delete_change(cid: int) -> None:
+    with _write_lock:
+        c = conn()
+        c.execute("DELETE FROM changes WHERE id = ?", (cid,))
+        c.commit()
+
+
+def events_count(since: float, until: float, kinds: list[str]) -> int:
+    q = f"SELECT COUNT(*) FROM events WHERE ts >= ? AND ts < ? AND kind IN ({', '.join('?' for _ in kinds)})"
+    return conn().execute(q, (since, until, *kinds)).fetchone()[0]
