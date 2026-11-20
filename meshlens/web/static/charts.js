@@ -153,5 +153,58 @@ const Charts = (() => {
     el.appendChild(legend(labels, labels.map((l, i) => colorOf(l, i)), new Set(), () => {}));
   }
 
-  return { time, bars, heatmap, strip, color, css };
+  // ------------------------------------------------------------ click a chart to see it large in a pop-up
+  function zoomModal() {
+    let m = document.getElementById("chart-zoom");
+    if (m) return m;
+    m = document.createElement("div");
+    m.id = "chart-zoom"; m.className = "modal"; m.hidden = true;
+    m.innerHTML = `<div class="card modal-card wide" role="dialog" aria-modal="true" aria-labelledby="chart-zoom-title">
+      <button class="link chart-zoom-close" style="float:right">&times; Close</button>
+      <h3 id="chart-zoom-title"></h3><div class="chart-box chart-zoom-box"></div></div>`;
+    const close = () => { m.hidden = true; m.querySelector(".chart-zoom-box").innerHTML = ""; };
+    m.addEventListener("click", (ev) => { if (ev.target === m || ev.target.closest(".chart-zoom-close")) close(); });
+    document.addEventListener("keydown", (ev) => { if (ev.key === "Escape" && !m.hidden) close(); });
+    document.body.appendChild(m);
+    return m;
+  }
+
+  function titleOf(el) {
+    const card = el.closest(".card, section, details");
+    const h = card && card.querySelector("h2, h3, h4, summary");
+    return h ? h.textContent.trim() : "";
+  }
+
+  function openZoom(el) {
+    const c = el._chart;
+    if (!c) return;
+    const m = zoomModal(), box = m.querySelector(".chart-zoom-box");
+    m.querySelector("#chart-zoom-title").textContent = titleOf(el);
+    m.hidden = false;                                 // visible first, so the box has a width to draw into
+    box._hidden = new Set(el._hidden || []);          // keep the series the user switched off
+    const big = Math.max(260, Math.round(window.innerHeight * 0.62));
+    const args = c.args.slice();
+    const oi = c.fn === time ? 0 : c.fn === bars ? 1 : -1;   // where the options object sits (after the element)
+    if (oi >= 0) args[oi] = { ...(args[oi] || {}), height: big };
+    c.fn(box, ...args);
+  }
+
+  // Each public chart remembers how it was drawn, so a click can redraw it large.
+  const zoomable = (fn) => (el, ...args) => {
+    const r = fn(el, ...args);
+    if (!el || el.classList.contains("chart-zoom-box")) return r;
+    el._chart = { fn, args };
+    el.classList.add("zoomable");
+    el.title = "Click to enlarge";
+    if (!el._zoomBound) {
+      el._zoomBound = true;
+      el.addEventListener("click", (ev) => {
+        if (ev.target.closest(".legend, a, button") || !el.querySelector("svg")) return;
+        openZoom(el);
+      });
+    }
+    return r;
+  };
+
+  return { time: zoomable(time), bars: zoomable(bars), heatmap: zoomable(heatmap), strip: zoomable(strip), color, css, openZoom };
 })();

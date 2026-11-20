@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.9.2 — 20 November 2026
+
+- **Lower CPU use**: the analysis is about five times faster (new indexes for band history and interface counters; errors
+  per port read from the first and last sample instead of a day of rows), runs one at a time with callers sharing the result,
+  and is kept for a minute (the tray icon reuses one up to 5 minutes old). The Graphs tab reads only the counters it draws and
+  is cached for a minute. The first start after updating builds two indexes, which takes a few seconds.
+- **Clickable addresses in issues**: a MAC in an issue opens that device, or the Router page when it is one of your own units;
+  an address never seen on your network explains whether it is private (randomised) or maker-assigned.
+- **Probe alerts recognise your own units**: disconnect floods sent by one of your mesh units are marked low and explained as
+  steering or roaming (or a device that keeps talking to a unit it is no longer joined to), not an attack.
+- **Click a graph to enlarge it** in a pop-up (Esc or a click outside closes it).
+
 ## 0.9.1 — 19 November 2026
 
 - **Guidance in the app**: every issue links to step-by-step instructions for the ASUS web UI and app (fixed channel, 2.4 GHz

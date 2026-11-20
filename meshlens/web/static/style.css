@@ -206,3 +206,6 @@ td.wrap { overflow-wrap: anywhere; }
 .ax.mark { fill: var(--accent); }
 .glossary dt { font-weight: 600; margin-top: 6px; } .glossary dd { margin: 0 0 4px 16px; }
 .settings-layout > *, .kv > * { min-width: 0; } .kv > div { overflow-wrap: anywhere; }
+.chart-box.zoomable { cursor: zoom-in; }
+.modal-card.wide { max-width: min(1400px, 96vw); }
+.chart-zoom-box { min-height: 200px; }

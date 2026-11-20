@@ -688,12 +688,26 @@ def net_issues(net: dict[str, Any], devs: dict[str, dict[str, Any]], now: float)
         text = e["detail"].get("text") or "?"
         groups[(e["unit"], _re.sub(r"\d+", "#", text)[:80])].append(e)
     sev_map = {"danger": "high", "warn": "medium", "info": "info"}
+    own = own_unit_lookup(net.get("units") or [])
     for (pid, key), es in groups.items():
         last = es[-1]["detail"]
         sev = sev_map.get(last.get("severity"), "low")
+        text = last.get("text") or ""
+        # The sender: "... from <mac> to <mac>", or "Access point <mac> disconnected devices ...".
+        sender = (_re.search(r"\bfrom ([0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5})", text)
+                  or _re.search(r"[Aa]ccess point ([0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5})", text))
+        mine = own(sender.group(1)) if sender else None
+        note = ""
+        if mine and any(w in text.lower() for w in ("deauth", "disassoc", "disconnect")):
+            # ASUS units steer and roam devices with disconnect frames: expected, not an attack.
+            sev = "low" if sev in ("high", "medium") else sev
+            note = (f" The sender is your own unit {mine} (one of its radio addresses), so this is the mesh moving the "
+                    "device (band steering or roaming), not an attack. Many in a row mean steering keeps failing.")
+        elif mine:
+            note = f" The sender is your own unit {mine}."
         out.append(_issue(
-            "probe_alert", sev, "network", f"{pid}|{key}", f"{pname.get(pid, pid)}: {last.get('text')}",
-            f"Reported {len(es)} time{'s' if len(es) > 1 else ''}, last {_hm(es[-1]['ts'])}.",
+            "probe_alert", sev, "network", f"{pid}|{key}", f"{pname.get(pid, pid)}: {text}",
+            f"Reported {len(es)} time{'s' if len(es) > 1 else ''}, last {_hm(es[-1]['ts'])}.{note}",
             "The probe's air monitor watches the Wi-Fi channel for attacks and oddities: floods of disconnect frames, a "
             "copy of your network name from another radio (evil twin), access points answering any name (Karma), beacon "
             "floods, and Bluetooth trackers that stay near. Your own mesh steering devices away also sends disconnects, "
@@ -884,3 +898,19 @@ def net_issues(net: dict[str, Any], devs: dict[str, dict[str, Any]], now: float)
                 "A device started offering a new service: a software update, a setting turned on, or new software.",
                 ["If you didn't expect it, check the device's settings or recent updates."], e["ts"], e["ts"]))
     return out
+
+
+def own_unit_lookup(units: list[dict[str, Any]]):
+    """mac -> unit name if the address is one of your mesh units (any radio/BSSID; ASUS varies byte 0 per SSID)."""
+    full: dict[str, str] = {}
+    tail: dict[str, str] = {}
+    for u in units:
+        name = u.get("alias") or u.get("model") or u["mac"]
+        for m in [u["mac"], *(u.get("macs") or [])]:
+            full[m.lower()] = name
+            tail[m.lower()[3:]] = name
+
+    def find(mac: str) -> str | None:
+        m = (mac or "").lower()
+        return full.get(m) or tail.get(m[3:])
+    return find

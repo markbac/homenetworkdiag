@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS station_samples (
 );
 CREATE INDEX IF NOT EXISTS station_mac_ts ON station_samples(mac, ts);
 CREATE INDEX IF NOT EXISTS station_ts ON station_samples(ts);
+CREATE INDEX IF NOT EXISTS station_mac_ts_band ON station_samples(mac, ts, band, rssi);   -- band history without table reads
 
 CREATE TABLE IF NOT EXISTS radio_samples (
   ts REAL, unit TEXT, iface TEXT, band TEXT,
@@ -72,6 +73,7 @@ CREATE TABLE IF NOT EXISTS iface_counters (
   carrier_changes INTEGER
 );
 CREATE INDEX IF NOT EXISTS iface_ts ON iface_counters(ts);
+CREATE INDEX IF NOT EXISTS iface_unit_iface_ts ON iface_counters(unit, iface, ts);
 
 CREATE TABLE IF NOT EXISTS events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -627,8 +629,38 @@ def speed_tests(since: float) -> list[dict[str, Any]]:
     return _rows(conn().execute("SELECT * FROM speed_tests WHERE ts >= ? ORDER BY ts", (since,)))
 
 
-def iface_counters_since(since: float) -> list[dict[str, Any]]:
+def iface_counters_since(since: float, unit: str | None = None) -> list[dict[str, Any]]:
+    """All counters since ``since`` (a day is ~300k rows on a big mesh: pass ``unit`` where you can)."""
+    if unit:
+        return _rows(conn().execute("SELECT * FROM iface_counters WHERE unit = ? AND ts >= ? ORDER BY ts", (unit, since)))
     return _rows(conn().execute("SELECT * FROM iface_counters WHERE ts >= ? ORDER BY ts", (since,)))
+
+
+def iface_first_last(since: float) -> list[dict[str, Any]]:
+    """The first and last counter sample per unit and interface since ``since`` (for errors over the period)."""
+    c = conn()
+    # Interfaces present now (the last hour), then two index seeks each: far cheaper than grouping a day of rows.
+    last = c.execute("SELECT MAX(ts) FROM iface_counters").fetchone()[0]
+    if last is None:
+        return []
+    pairs = c.execute("SELECT DISTINCT unit, iface FROM iface_counters WHERE ts >= ?", (max(since, last - 3600),)).fetchall()
+    out: list[dict[str, Any]] = []
+    for unit, iface in pairs:
+        for order in ("ASC", "DESC"):
+            out += _rows(c.execute(
+                f"""SELECT * FROM iface_counters WHERE unit = ? AND iface = ? AND ts >= ? AND rx_errs IS NOT NULL
+                    ORDER BY ts {order} LIMIT 1""", (unit, iface, since)))
+    out.sort(key=lambda r: r["ts"])
+    return out
+
+
+def throughput_counters(since: float) -> list[dict[str, Any]]:
+    """Byte counters for the traffic graphs only: internet ports and MediaTek radios (not VLANs or uplinks)."""
+    return _rows(conn().execute(
+        """SELECT ts, unit, iface, rx_bytes, tx_bytes FROM iface_counters
+           WHERE ts >= ? AND (iface IN ('ppp0', 'eth0')
+                 OR ((iface LIKE 'ra%' OR iface LIKE 'at%') AND iface NOT LIKE '%.%'))
+           ORDER BY ts""", (since,)))
 
 
 def radio_samples_since(since: float) -> list[dict[str, Any]]:

@@ -196,7 +196,7 @@ def collect(hours: float) -> dict[str, Any]:
         "events": events_per_bucket(db.events(since, limit=500000), since, max(b, 300)),
         "clients": clients_over_time(db.station_samples_since(since), names, b),
         "rssi": rssi_histogram(db.latest_stations(), now),
-        "traffic": throughput(db.iface_counters_since(since), names, router),
+        "traffic": throughput(db.throughput_counters(since), names, router),
         "radio_errors": radio_errors(db.radio_samples_since(since), names),
         "latency": latency_series(pings),
         "heatmap": latency_heatmap(db.ping_minutes(now - 7 * 86400)),
@@ -248,3 +248,20 @@ def device(mac: str, hours: float) -> dict[str, Any]:
     return {"hours": hours, "signal": signal, "tx_rate": tx, "rx_rate": rx, "down_mbps": down, "up_mbps": up,
             "spans": spans, "events": events_per_bucket(db.events(since, mac=mac, limit=100000), since, max(300, bucket_size(hours))),
             "ping": ping, "daily": daily}
+
+
+_cache: dict[float, tuple[float, dict[str, Any]]] = {}
+_cache_lock = __import__("threading").Lock()
+
+
+def collect_cached(hours: float, max_age: float = 60) -> dict[str, Any]:
+    """``collect`` at most once a minute per period, one at a time (it reads a lot of history)."""
+    with _cache_lock:
+        hit = _cache.get(hours)
+        if hit and time.time() - hit[0] < max_age:
+            return hit[1]
+        res = collect(hours)
+        if len(_cache) > 8:
+            _cache.clear()
+        _cache[hours] = (time.time(), res)
+        return res
