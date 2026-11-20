@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.3 — 20 November 2026
+
+- **Updates are marked as changes automatically**: when MeshLens is updated, and when a mesh unit's firmware changes, a change
+  is recorded (Settings → Changes you made), drawn on every graph and compared before / after like the ones you mark.
+  The first start of 0.9.3 only remembers the version, so updates are recorded from the next one on.
+
 ## 0.9.2 — 20 November 2026
 
 - **Lower CPU use**: the analysis is about five times faster (new indexes for band history and interface counters; errors
