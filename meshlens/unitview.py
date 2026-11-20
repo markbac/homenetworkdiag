@@ -13,7 +13,7 @@ from .store import db
 def wired_counters(mac: str) -> list[dict[str, Any]]:
     """Wired interfaces: errors and drops over the last 24 h and since start-up."""
     from .collectors.asus.parsers import is_wired
-    rows = [c for c in db.iface_counters_since(time.time() - 86400) if c["unit"] == mac and is_wired(c["iface"])
+    rows = [c for c in db.iface_counters_since(time.time() - 86400, unit=mac) if is_wired(c["iface"])
             and c.get("rx_errs") is not None]
     by: dict[str, list] = defaultdict(list)
     for c in rows:
@@ -41,7 +41,7 @@ def backhaul_traffic(mac: str, info: dict[str, Any], since: float) -> dict[str, 
     from .collectors.asus.parsers import band_of_freq, band_of_iface
     ifaces = info.get("ifaces") or []
     band_by_iface = {i["iface"]: i.get("band") or band_of_freq(i.get("freq")) for i in ifaces}
-    rows = [c for c in db.iface_counters_since(since) if c["unit"] == mac and is_backhaul_iface(c["iface"], ifaces)]
+    rows = [c for c in db.iface_counters_since(since, unit=mac) if is_backhaul_iface(c["iface"], ifaces)]
     by: dict[str, list] = defaultdict(list)
     for c in rows:
         by[c["iface"]].append(c)
@@ -87,7 +87,7 @@ def detail(mac: str) -> dict[str, Any] | None:
 
     # Traffic per interface from the last two counter samples.
     rates: dict[str, dict[str, float]] = {}
-    rows = [c for c in db.iface_counters_since(now - 900) if c["unit"] == mac]
+    rows = db.iface_counters_since(now - 900, unit=mac)
     by: dict[str, list] = defaultdict(list)
     for c in rows:
         by[c["iface"]].append(c)

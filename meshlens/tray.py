@@ -65,7 +65,7 @@ def state(engine: Engine) -> tuple[str, str]:
     if engine.paused:
         return "paused", "MeshLens: paused"
     try:
-        a = engine.analysis(24)
+        a = engine.analysis(24, max_age=300)
     except Exception:
         return "none", "MeshLens"
     n = a["network"]

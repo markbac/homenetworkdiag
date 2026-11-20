@@ -536,7 +536,7 @@ async def graphs_get(request: web.Request) -> web.Response:
         hours = max(1.0, min(float(request.query.get("hours", 24)), 24 * 31))
     except ValueError:
         hours = 24.0
-    return web.json_response(await asyncio.to_thread(graphs.collect, hours))
+    return web.json_response(await asyncio.to_thread(graphs.collect_cached, hours))
 
 
 async def unit_detail(request: web.Request) -> web.Response:

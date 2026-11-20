@@ -104,6 +104,17 @@ function subjectLink(i) {
   return "";
 }
 
+// Addresses in issue text become links: your own units go to their Router page, anything else opens the device.
+const MAC_RE = /\b[0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5}\b/g;
+function macLinks(text) {
+  return esc(text).replace(MAC_RE, (raw) => {
+    const m = raw.toLowerCase(), u = unitsByMac[m] || unitByAddr[m] || unitByTail[m.slice(3)];
+    if (u) return `<a href="#" data-router-unit="${esc(u.mac)}" title="${esc(raw)}: a radio of this mesh unit">${esc(u.alias || u.model || u.mac)} <span class="mono small">${esc(raw)}</span></a>`;
+    const d = devicesByMac[m];
+    return `<a href="#" data-mac="${esc(m)}" title="Open this device">${d ? esc(displayName(d, m)) + ` <span class="mono small">${esc(raw)}</span>` : `<span class="mono">${esc(raw)}</span>`}</a>`;
+  });
+}
+
 function hideLabel(i) {
   const who = i.scope === "device" ? "this device" : i.scope === "unit" ? "this unit" : "the network";
   return i.hidden ? "Show this again" : `Hide this issue for ${who}`;
@@ -112,9 +123,9 @@ function hideLabel(i) {
 function renderIssue(i, open = false) {
   const when = i.from ? `<span class="muted small">${esc(fmtTime(i.from))}${i.to && i.to !== i.from ? " – " + esc(fmtTime(i.to)) : ""}</span>` : "";
   return `<details class="issue ${esc(i.severity)}${i.hidden ? " hidden-issue" : ""}" ${open ? "open" : ""}>
-    <summary><span class="sev ${esc(i.severity)}">${esc(SEV[i.severity] || i.severity)}</span> <b>${esc(i.title)}</b> ${when}${i.times && i.times.length > 1 ? ` <span class="pill">×${i.times.length}</span>` : ""}${i.status === "new" ? ' <span class="pill new">new</span>' : ""}${i.hidden ? ' <span class="pill">hidden</span>' : ""}</summary>
+    <summary><span class="sev ${esc(i.severity)}">${esc(SEV[i.severity] || i.severity)}</span> <b>${macLinks(i.title)}</b> ${when}${i.times && i.times.length > 1 ? ` <span class="pill">×${i.times.length}</span>` : ""}${i.status === "new" ? ' <span class="pill new">new</span>' : ""}${i.hidden ? ' <span class="pill">hidden</span>' : ""}</summary>
     <div class="issue-body">
-      <p><span class="lbl">Seen</span> ${esc(i.evidence)} ${subjectLink(i) ? "· " + subjectLink(i) : ""}</p>
+      <p><span class="lbl">Seen</span> ${macLinks(i.evidence)} ${subjectLink(i) ? "· " + subjectLink(i) : ""}</p>
       <p><span class="lbl">Why</span> ${esc(i.cause)}</p>
       ${i.fixes && i.fixes.length ? `<div><span class="lbl">Try</span><ol>${i.fixes.map((f) => `<li>${esc(f)}</li>`).join("")}</ol></div>` : ""}
       ${typeof issueGuidance === "function" ? issueGuidance(i) : ""}
@@ -280,7 +291,19 @@ async function loadDevices() {
 
 // ---------------------------------------------------------------- device drawer
 async function openDevice(mac) {
-  const d = await api(`/api/devices/${encodeURIComponent(mac)}?hours=24`);
+  let d;
+  try { d = await api(`/api/devices/${encodeURIComponent(mac)}?hours=24`); }
+  catch (e) {
+    const local = (parseInt(mac.slice(0, 2), 16) & 2) === 2;
+    $("#drawer-body").innerHTML = `<h2 class="mono">${esc(mac.toUpperCase())}</h2>
+      <p>This address has never connected to your network, so MeshLens knows nothing more about it.</p>
+      <p class="muted">${local ? "It is a <b>private or made-up address</b> (the second character is 2, 6, A or E): phones use these "
+        + "when scanning, and attack tools use them to hide. It can't be traced to a maker."
+        : "It is a maker-assigned address: the first half identifies the maker (look it up in any OUI / MAC vendor list)."}
+        A probe hears every radio in range, including the neighbours'.</p>`;
+    $("#drawer").hidden = false;
+    return;
+  }
   const last = d.history[d.history.length - 1] || {};
   const s = d.stability || {}, h = d.health || {};
   $("#drawer-body").innerHTML = `

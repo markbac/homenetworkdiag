@@ -85,13 +85,24 @@ class Engine:
             self.monitor.cfg = cfg.monitor
             self._analysis.clear()
 
-    def analysis(self, hours: float = 24) -> dict[str, Any]:
-        """Issues and health for the last ``hours`` (cached for 30 s)."""
-        now = time.time()
+    def analysis(self, hours: float = 24, max_age: float = 60) -> dict[str, Any]:
+        """Issues and health for the last ``hours`` (cached for ``max_age`` seconds).
+
+        Only one analysis runs at a time: callers that arrive while one is running wait and share its result
+        (the Overview, device list, map and tray all ask at once)."""
         with self._lock:
             hit = self._analysis.get(hours)
-            if hit and now - hit[0] < 30:
+            if hit and time.time() - hit[0] < max_age:
                 return hit[1]
+        with self.__dict__.setdefault("_compute_lock", threading.Lock()):
+            with self._lock:
+                hit = self._analysis.get(hours)
+                if hit and time.time() - hit[0] < max_age:
+                    return hit[1]
+            return self._analyse(hours)
+
+    def _analyse(self, hours: float) -> dict[str, Any]:
+        now = time.time()
         since = now - hours * 3600
         net = {"unit_events": db.events(since, kinds=["radar", "channel_change", "channel_replan", "unit_reboot", "link_change",
                                                      "wan_ip_change", "router_warning", "l2_loop", "probe_alert",
@@ -101,7 +112,7 @@ class Engine:
                "band_history": db.band_history(now - 7 * 86400, [s["mac"] for s in latest
                                                                  if s.get("band") == "2.4" and now - s["ts"] < 900]),
                "devices": db.devices(),
-               "iface_counters": db.iface_counters_since(since), "units": db.units(),
+               "iface_counters": db.iface_first_last(since), "units": db.units(),
                "unit_samples": db.unit_samples_since(since), "settings": db.latest_settings(), "host_lan": db.host_lan_since(since), "air": db.air_scan_since(max(since, now - 6 * 3600)),
                "analysis_cfg": self.cfg.analysis, "pings": db.ping_minutes(since), "speeds": db.speed_tests(now - 7 * 86400),
                "unit_names": {u["mac"]: u.get("alias") or u.get("model") or u["mac"] for u in db.units()},
@@ -245,7 +256,7 @@ class Engine:
                                                      "temperature": r.get("temperature")})
         units = db.units()
         router = next((u["mac"] for u in units if u.get("role") == "router"), None)
-        wan = graphs.throughput(db.iface_counters_since(now - 600), {}, router)["wan"]
+        wan = graphs.throughput(db.throughput_counters(now - 600), {}, router)["wan"]
         t["summary"] = {
             "speed": speeds[-1] if speeds else None,
             "latency": [{"label": x["label"], "kind": x["kind"], "avg_ms": x["avg_ms"],
