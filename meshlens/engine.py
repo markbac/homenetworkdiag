@@ -53,6 +53,11 @@ class Engine:
     # ------------------------------------------------------------ control
 
     def start(self) -> None:
+        try:
+            from . import __version__
+            db.note_app_version(__version__)
+        except Exception:
+            log.exception("could not record the MeshLens version")
         self._thread = threading.Thread(target=self._loop, name="meshlens-engine", daemon=True)
         self._thread.start()
         threading.Thread(target=oui.load, name="oui-load", daemon=True).start()

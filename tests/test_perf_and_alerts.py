@@ -69,3 +69,22 @@ def test_analysis_runs_once_for_concurrent_callers(tmp_home, monkeypatch):
     [t.start() for t in ts]
     [t.join() for t in ts]
     assert calls == [24]
+
+
+def test_firmware_change_is_recorded_once(tmp_home):
+    from meshlens.store import db
+    db.upsert_unit("02:28:aa:00:00:60", alias="Landing", firmware="3.0.0.6.102_58601-gaaaa_514-gbbbb_M7EE")
+    db.upsert_unit("02:28:aa:00:00:60", firmware="3.0.0.6.102_58601-gcccc_514-gdddd_M7EE")    # same build: no change
+    assert db.changes() == []
+    db.upsert_unit("02:28:aa:00:00:60", firmware="3.0.0.6.102_59000-geeee_600-gffff_M7EE")
+    db.upsert_unit("02:28:aa:00:00:60", firmware="3.0.0.6.102_59000-geeee_600-gffff_M7EE")
+    notes = [c["note"] for c in db.changes()]
+    assert notes == ["Firmware on Landing changed: 3.0.0.6.102_58601 → 3.0.0.6.102_59000 (recorded automatically)"]
+
+
+def test_app_update_is_recorded(tmp_home):
+    from meshlens.store import db
+    assert db.note_app_version("0.9.2") is None          # first run: nothing to compare with
+    assert db.note_app_version("0.9.2") is None
+    assert db.note_app_version("0.9.3") == "MeshLens updated: 0.9.2 → 0.9.3 (recorded automatically)"
+    assert [c["note"] for c in db.changes()] == ["MeshLens updated: 0.9.2 → 0.9.3 (recorded automatically)"]

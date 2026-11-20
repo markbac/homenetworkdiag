@@ -279,15 +279,44 @@ def update_enrichment(mac: str, **fields: Any) -> bool:
         return cur.rowcount > 0
 
 
+def firmware_key(fw: str | None) -> str | None:
+    """The comparable part of an ASUS firmware string: '3.0.0.6.102_58601-gbeaed27_514-g99923_M7EE' -> '3.0.0.6.102_58601'."""
+    import re
+    m = re.match(r"\s*(\d+(?:\.\d+)+(?:_\d+)?)", fw or "")
+    return m.group(1) if m else ((fw or "").strip() or None)
+
+
 def upsert_unit(mac: str, **fields: Any) -> None:
+    """Insert or update a mesh unit. A firmware change on a known unit is recorded as a change (Settings → Changes)."""
     mac = mac.lower()
     cols = {k: v for k, v in fields.items() if v is not None}
     with _write_lock:
         c = conn()
+        old = c.execute("SELECT firmware, alias, model FROM units WHERE mac = ?", (mac,)).fetchone()
         c.execute("INSERT OR IGNORE INTO units(mac) VALUES (?)", (mac,))
         if cols:
             c.execute(f"UPDATE units SET {', '.join(f'{k} = ?' for k in cols)} WHERE mac = ?", (*cols.values(), mac))
+        if old and old[0] and cols.get("firmware"):
+            a, b = firmware_key(old[0]), firmware_key(cols["firmware"])
+            if a and b and a != b:
+                name = cols.get("alias") or old[1] or cols.get("model") or old[2] or mac
+                c.execute("INSERT INTO changes(ts, note) VALUES (?, ?)",
+                          (time.time(), f"Firmware on {name} changed: {a} → {b} (recorded automatically)"))
         c.commit()
+
+
+def note_app_version(version: str) -> str | None:
+    """Remember which MeshLens version last ran; on an update, record it as a change. Returns the note added, if any."""
+    with _write_lock:
+        c = conn()
+        row = c.execute("SELECT value FROM meta WHERE key = 'app_version'").fetchone()
+        note = None
+        if row and row[0] and row[0] != version:
+            note = f"MeshLens updated: {row[0]} → {version} (recorded automatically)"
+            c.execute("INSERT INTO changes(ts, note) VALUES (?, ?)", (time.time(), note))
+        c.execute("INSERT OR REPLACE INTO meta(key, value) VALUES ('app_version', ?)", (version,))
+        c.commit()
+        return note
 
 
 def insert_many(table: str, rows: Iterable[dict[str, Any]]) -> int:
