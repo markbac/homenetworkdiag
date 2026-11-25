@@ -262,7 +262,30 @@
     restarted or lost its backhaul.</dd>
   <dt>Wi-Fi events</dt><dd>Kicks, roam attempts, disconnects and refused joins per interval. Spikes line up with complaints.</dd>
   <dt>Internet traffic</dt><dd>Download and upload through the router's internet connection, averaged per router poll. Compare
-    with lag: a full upload is the classic cause of bufferbloat.</dd>
+    with lag: a full upload is the classic cause of bufferbloat. It is counted on the router's physical internet port (for
+    example <code>eth1</code>), with the Ethernet and PPPoE headers taken off. The internet interface <code>ppp0</code> isn't used
+    when the port is known: on routers with hardware acceleration (the BT8), accelerated traffic never passes its counters. In
+    a test on a BT8, a 200 MB download added 0.4 MB to <code>ppp0</code> and 212 MB to <code>eth1</code>. The note under
+    the chart says which counter is used.</dd>
+  <dt id="top-users">Top internet users</dt><dd>How much each device downloaded and uploaded over the internet in the period. MeshLens reads
+    the router's connection table every poll and adds up how much each connection grew since the last poll, per device.
+    These are <b>estimates</b>: a connection that opens and closes between two polls is missed, and on routers with hardware
+    acceleration the table's counters are updated in batches, so a single minute can be too high or too low. Over an hour or
+    more the totals and the order of devices are reliable. The router's own traffic (firmware checks, its speed tests) is
+    listed as "Router itself". Only IPv4 is counted. Each device's graphs show its own internet use, and the
+    <b>internet</b> and <b>internet_daily</b> export datasets hold the figures. If one device uses most of the line for an hour,
+    MeshLens notes it (information only).</dd>
+  <dt id="lan-traffic">Traffic inside the house, per switch port</dt><dd>Traffic between devices at home (backups to a NAS, casting,
+    file copies) is switched without reaching the router, so it can only be counted at a managed switch. MeshLens reads:
+    <ul><li><b>UniFi</b> switches through your UniFi Network controller (Settings → UniFi, a View Only admin): bytes, packets and
+      errors per port, and which devices are on each port.</li>
+    <li><b>TP-Link Easy Smart</b> switches (TL-SG105E, TL-SG108E, TL-SG608E and similar) through their own web page, using the login
+      under Settings → Device logins (kind "TP-Link Easy Smart"): good and bad packets per port and link speed. These switches
+      don't count bytes or report which devices are on a port, and their page only works over plain HTTP, so the password
+      crosses your network unencrypted, as it does when you open their web page yourself.</li></ul>
+    Switches are read every 5 minutes. Counters are per port, so a port with another switch or a powerline adapter behind it
+    shows all of their traffic together. Ports with errors are reported like errors on the router's own ports. If a switch's
+    page isn't recognised, MeshLens keeps a copy in the raw log so the reader can be fixed.</dd>
   <dt>Wi-Fi traffic per unit and band</dt><dd>Data through each radio. Shows which unit and band carry the load.</dd>
   <dt>Latency and packet loss</dt><dd>Every monitored target on one chart; loss for the router and internet targets.</dd>
   <dt>When is the internet laggy?</dt><dd>A week of internet latency by day and hour. A colour pattern at the same hours every
@@ -272,8 +295,23 @@
   <dt>Powerline link speeds</dt><dd>The slower direction of each adapter pair over time.</dd>
 </dl>
 <p>Every device has its own graphs too (click it anywhere): signal, which unit and band it was on (each colour is a unit/band,
-  so roams and kicks show as colour changes), link speed, data used, Wi-Fi events, ping latency (for watched devices) and its
-  daily health score.</p>
+  so roams and kicks show as colour changes), link speed, data used over Wi-Fi, internet use (estimate), traffic at its switch
+  port (UniFi), the apps it used (when ASUS Traffic Analyzer is on), Wi-Fi events, ping latency (for watched devices) and its
+  daily health score. Data used over Wi-Fi comes from the unit it is connected to: <code>hostapd</code> on the BT8 and
+  <code>apstats</code> on the BD4 (read for up to 48 devices per unit per poll).</p>
+
+<h3 id="traffic-analyzer">ASUS Traffic Analyzer (apps per device)</h3>
+<p>ASUS routers have a <b>Traffic Analyzer</b> (Trend Micro engine) that records how much each device used per app (YouTube,
+  Netflix, game updates...). If you have turned it on, MeshLens reads its hourly totals read-only and shows them in each
+  device's graphs. MeshLens <b>never turns it on</b>: that is your choice, because</p>
+<ul><li>you have to accept Trend Micro's terms in the ASUS app or web page;</li>
+  <li>on some models it reduces hardware acceleration, which can lower top speed on fast lines;</li>
+  <li>it uses some of the router's storage and processor.</li></ul>
+<p>To try it: router web page → <b>Traffic Analyzer → Statistic</b> → turn on. Without it, MeshLens's own per-device internet
+  estimate (Top internet users) still works.</p>
+<h3 id="issue-internet_hog">One device is using most of the internet</h3><p>Information only: one device moved most of the
+  internet traffic in the last hour. Only act if calls or games lag at the same time: schedule the backup or update for the
+  night, or turn on QoS so the line stays responsive.</p>
 
 <h2 id="router-tab">Router tab</h2>
 <p>Everything MeshLens reads from each unit, in one place (read-only):</p>

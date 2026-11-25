@@ -52,7 +52,7 @@ Mesh: Second Floor prefers First Floor as its parent (`amas_wlc_target_bssid`); 
 | Clients with interface, auth type, MLO, timestamp | | | `/tmp/allwclientlist.json` (main router) |
 | Wired clients per node | | | `/tmp/wiredclientlist.json` |
 | Device database (name, vendor, type, OS, online, wired/wireless, MLO links, connected since, sources of each field) | | | `/jffs/nmp_cl_json.js` (66 KB, main router) |
-| Per-client signal, tx/rx rate + MCS/NSS/GI, packets, bytes, idle, connected time, flags | `hostapd_cli -i ra1 all_sta` (per SSID interface) | `wlanconfig ath001 list sta` (RSSI current/min/max, rates, idle, assoc time, caps) | |
+| Per-client signal, tx/rx rate + MCS/NSS/GI, packets, bytes, idle, connected time, flags | `hostapd_cli -i ra1 all_sta` (per SSID interface) | `wlanconfig ath001 list sta` (RSSI current/min/max, rates, idle, assoc time, caps); bytes and packets from `apstats -s -m <sta>` (`Tx/Rx Data Bytes`, AP's side) | |
 | Backhaul link (signal, rate, MCS, retries/failed) | `iw dev rax0 station dump` | `iwconfig sta0/sta1` | |
 | Radio channel, width, tx power | `iw dev` | `iwconfig`, `iw dev` | nvram `wlX_*` |
 | Channel utilisation | `mwctl dev <if> dump radio_stats` (to confirm) | `apstats -R`: utilisation **disabled** on stock firmware | probes |
@@ -212,6 +212,29 @@ Load: one SSH session per unit kept open, commands run sequentially with short t
 - Per radio: busy % on every band including 6 GHz, noise, DFS events, compared with what the probes hear.
 - Per node: backhaul quality, offline periods, client counts.
 - Settings explained (multicast rate, IGMP snooping, guest SSIDs, steering) and changes tracked.
+
+## Traffic counters (verified 25 November 2026)
+
+- **Internet traffic on the BT8: count `eth1`, not `ppp0`.** The MediaTek hardware NAT (`mtkhnat`) forwards most internet
+  traffic without it passing `ppp0`'s counters. Measured: a 200 MB reference download added **0.4 MB** to `ppp0` and
+  **212 MB** to `eth1` (209 MB after taking off 22 bytes per packet: Ethernet 14 + PPPoE/PPP 8). Over 10 minutes of normal use
+  `ppp0` counted 35 MB down / 19 MB up, `eth1` 734 / 172 MB (headers off). Since start-up `eth1` had 382 GB against
+  `ppp0`'s 19 GB. The port and type come from `nvram get wan0_ifname` (eth1), `wan0_gw_ifname` (ppp0), `wan0_proto` (pppoe),
+  now read with the identity every poll.
+- **Per-device internet use from conntrack** (`nf_conntrack_acct` = 1): internet connections are those whose reply goes to
+  `wan0_ipaddr`; each poll the router prints `proto|src|dst|sport|dport|bytes_out|bytes_in` (about 500 lines, 30 KB) and
+  MeshLens takes each connection's growth since the last poll. Over the same 10 minutes the sum was 598 MB down / 240 MB up:
+  the right order, but hardware-offloaded connections are updated in batches, so single minutes jump (one minute read
+  307 MB against 452 MB on `eth1`, the next 11 MB against 6 MB). Shown as **estimates**; the order of devices is reliable.
+  No IPv6 connections were present (`ipv6` lines: 0).
+- **BD4 per-station bytes**: `apstats -s -m <MAC>` (STA level) prints about 130 lines per station, including
+  `Tx Data Bytes`, `Rx Data Bytes`, `Tx Data Packets`, `Rx Data Packets`; for a station not on the unit it prints
+  `apstats: Error - Could not find specified STA.` MeshLens runs it only for stations `wlanconfig` lists, at most 48 per
+  poll, and filters the output to those four lines on the unit.
+- **Traffic Analyzer**: off on this router (no `/jffs/.sys/TrafficAnalyzer/`, `bwdpi_db_enable` empty). `/sbin/rc` names
+  `/jffs/.sys/TrafficAnalyzer/TrafficAnalyzer.db`; `sqlite3` 3.42.0 is on the router. MeshLens reads the `traffic` table
+  (`mac, app_name, cat_name, timestamp, tx, rx`, the documented Asuswrt layout) with `sqlite3 -readonly`, only if the file
+  exists, and checks the columns with `PRAGMA table_info` first; an unexpected layout is kept in the raw log, not guessed.
 
 ## Dual-band MediaTek nodes (RT-AX57 Go) — added 19 November 2026
 

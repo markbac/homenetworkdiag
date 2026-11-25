@@ -434,7 +434,7 @@ const SECTIONS = [
     { k: "subnets", label: "Subnets (one per line)", type: "list", hint: "e.g. 10.0.10.0/23" },
     { k: "exclude", label: "Never scan these addresses or ranges (one per line)", type: "list" },
     { k: "dns_servers", label: "DNS servers to test (one per line; empty = the router)", type: "list" }] },
-  { id: "router", title: "ASUS router", help: "set-router", secretLabel: "SSH password", note: "MeshLens only runs read-only commands. Nodes are found automatically from the router's mesh list.", fields: [
+  { id: "router", title: "ASUS router", help: "set-router", secretLabel: "SSH password", note: "MeshLens only runs read-only commands. Nodes are found automatically from the router's mesh list. If you turn on ASUS Traffic Analyzer (Traffic Analyzer → Statistic in the router's web page), MeshLens also reads its per-app totals; MeshLens never turns it on (see Help: Traffic Analyzer).", fields: [
     { k: "host", label: "Router address", type: "text" }, { k: "port", label: "SSH port", type: "number" },
     { k: "username", label: "Username", type: "text" },
     { k: "poll_seconds", label: "Quick poll every (seconds)", type: "number", hint: "clients, signal, radio health, new log lines" },

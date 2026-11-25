@@ -146,6 +146,32 @@ CREATE TABLE IF NOT EXISTS conn_samples (
 );
 CREATE INDEX IF NOT EXISTS conn_samples_ts ON conn_samples(ts);
 
+-- Internet bytes per local address since the previous poll, from the router's connection table (estimate).
+CREATE TABLE IF NOT EXISTS device_traffic (
+  ts REAL, secs REAL, ip TEXT, mac TEXT, bytes_in INTEGER, bytes_out INTEGER
+);
+CREATE INDEX IF NOT EXISTS device_traffic_ts ON device_traffic(ts);
+CREATE INDEX IF NOT EXISTS device_traffic_mac_ts ON device_traffic(mac, ts);
+
+CREATE TABLE IF NOT EXISTS daily_device_traffic (
+  day TEXT, mac TEXT, ip TEXT, bytes_in INTEGER, bytes_out INTEGER,
+  PRIMARY KEY (day, mac, ip)
+);
+
+-- ASUS Traffic Analyzer hourly totals per device and app (only when the user has turned it on).
+CREATE TABLE IF NOT EXISTS app_traffic (
+  hour REAL, mac TEXT, app TEXT, category TEXT, bytes_in INTEGER, bytes_out INTEGER,
+  PRIMARY KEY (hour, mac, app, category)
+);
+
+-- Managed switches: counters per port (UniFi bytes, TP-Link Easy Smart packets) and devices seen on each port.
+CREATE TABLE IF NOT EXISTS switch_ports (
+  ts REAL, switch TEXT, port INTEGER, name TEXT, up INTEGER, speed INTEGER,
+  rx_bytes INTEGER, tx_bytes INTEGER, rx_packets INTEGER, tx_packets INTEGER, rx_errors INTEGER, tx_errors INTEGER,
+  macs TEXT
+);
+CREATE INDEX IF NOT EXISTS switch_ports_ts ON switch_ports(ts);
+
 CREATE TABLE IF NOT EXISTS probes (
   id TEXT PRIMARY KEY, ip TEXT, chip TEXT, bands TEXT, firmware TEXT,
   adopted INTEGER, paired INTEGER, room TEXT, spot TEXT,
@@ -355,10 +381,12 @@ def prune(raw_days: int, summary_days: int, now: float | None = None) -> None:
         c = conn()
         for t in ("station_samples", "radio_samples", "iface_counters", "events", "unit_settings", "inventory_events",
                   "plc_rates", "ping_minutes", "host_lan", "air_scan", "unit_samples", "conn_samples",
-                  "probe_aps", "probe_clients"):
+                  "probe_aps", "probe_clients", "device_traffic", "switch_ports"):
             c.execute(f"DELETE FROM {t} WHERE ts < ?", (cut,))
         day_cut = time.strftime("%Y-%m-%d", time.localtime(now - summary_days * 86400))
         c.execute("DELETE FROM daily_device_summary WHERE day < ?", (day_cut,))
+        c.execute("DELETE FROM daily_device_traffic WHERE day < ?", (day_cut,))
+        c.execute("DELETE FROM app_traffic WHERE hour < ?", (now - summary_days * 86400,))
         c.execute("DELETE FROM speed_tests WHERE ts < ?", (now - summary_days * 86400,))
         c.commit()
 
@@ -507,6 +535,71 @@ def rollup_day(day: str, start: float, end: float, score_fn) -> int:
                           [tuple(r[k] for k in keys) for r in rows])
         c.commit()
     return len(rows)
+
+
+def rollup_traffic_day(day: str, start: float, end: float) -> int:
+    """Internet bytes per device for one local day (kept like the other daily summaries)."""
+    c = conn()
+    rows = [dict(r) for r in c.execute(
+        """SELECT COALESCE(mac, '') AS mac, CASE WHEN mac IS NULL THEN ip ELSE '' END AS ip,
+                  SUM(bytes_in) AS bytes_in, SUM(bytes_out) AS bytes_out
+           FROM device_traffic WHERE ts >= ? AND ts < ? GROUP BY 1, 2""", (start, end))]
+    with _write_lock:
+        c.execute("DELETE FROM daily_device_traffic WHERE day = ?", (day,))
+        c.executemany("INSERT INTO daily_device_traffic(day, mac, ip, bytes_in, bytes_out) VALUES (?, ?, ?, ?, ?)",
+                      [(day, r["mac"], r["ip"], r["bytes_in"], r["bytes_out"]) for r in rows])
+        c.commit()
+    return len(rows)
+
+
+def device_traffic_totals(since: float, until: float | None = None) -> list[dict[str, Any]]:
+    """Internet bytes per device (or per address when the device is unknown) in a period."""
+    return _rows(conn().execute(
+        """SELECT mac, CASE WHEN mac IS NULL THEN ip END AS ip, MAX(ip) AS last_ip,
+                  SUM(bytes_in) AS bytes_in, SUM(bytes_out) AS bytes_out, MIN(ts) AS first, MAX(ts) AS last
+           FROM device_traffic WHERE ts >= ? AND ts < ? GROUP BY mac, CASE WHEN mac IS NULL THEN ip END""",
+        (since, until if until is not None else time.time() + 1)))
+
+
+def store_app_traffic(rows: list[dict[str, Any]]) -> int:
+    """Hourly app totals; an hour read again (still filling up) replaces the earlier reading."""
+    with _write_lock:
+        c = conn()
+        c.executemany("INSERT OR REPLACE INTO app_traffic(hour, mac, app, category, bytes_in, bytes_out) VALUES (?, ?, ?, ?, ?, ?)",
+                      [(r["hour"], r["mac"], r["app"], r.get("category") or "", r["bytes_in"], r["bytes_out"]) for r in rows])
+        c.commit()
+    return len(rows)
+
+
+def app_traffic(since: float, mac: str | None = None) -> list[dict[str, Any]]:
+    """Totals per app (and device) in a period, biggest first."""
+    q = """SELECT mac, app, category, SUM(bytes_in) AS bytes_in, SUM(bytes_out) AS bytes_out FROM app_traffic
+           WHERE hour >= ?"""
+    args: list[Any] = [since - 3600]
+    if mac:
+        q += " AND mac = ?"
+        args.append(mac.lower())
+    return _rows(conn().execute(q + " GROUP BY mac, app, category ORDER BY SUM(bytes_in) + SUM(bytes_out) DESC", args))
+
+
+def switch_ports_since(since: float) -> list[dict[str, Any]]:
+    return _rows(conn().execute("SELECT * FROM switch_ports WHERE ts >= ? ORDER BY ts", (since,)))
+
+
+def device_traffic_history(since: float, mac: str | None = None) -> list[dict[str, Any]]:
+    q, args = "SELECT ts, secs, ip, mac, bytes_in, bytes_out FROM device_traffic WHERE ts >= ?", [since]
+    if mac:
+        q += " AND mac = ?"
+        args.append(mac.lower())
+    return _rows(conn().execute(q + " ORDER BY ts", args))
+
+
+def daily_traffic(since_day: str, mac: str | None = None) -> list[dict[str, Any]]:
+    q, args = "SELECT * FROM daily_device_traffic WHERE day >= ?", [since_day]
+    if mac:
+        q += " AND mac = ?"
+        args.append(mac.lower())
+    return _rows(conn().execute(q + " ORDER BY day", args))
 
 
 def daily_summary(since_day: str, mac: str | None = None) -> list[dict[str, Any]]:
@@ -683,13 +776,17 @@ def iface_first_last(since: float) -> list[dict[str, Any]]:
     return out
 
 
-def throughput_counters(since: float) -> list[dict[str, Any]]:
-    """Byte counters for the traffic graphs only: internet ports and MediaTek radios (not VLANs or uplinks)."""
+def throughput_counters(since: float, wan_ifaces: Iterable[str] = ()) -> list[dict[str, Any]]:
+    """Byte counters for the traffic graphs only: internet ports and MediaTek radios (not VLANs or uplinks).
+
+    ``wan_ifaces``: the router's physical internet port (e.g. eth1), read alongside ppp0.
+    """
+    wan = sorted({"ppp0", "eth0", *[w for w in wan_ifaces if w]})
     return _rows(conn().execute(
-        """SELECT ts, unit, iface, rx_bytes, tx_bytes FROM iface_counters
-           WHERE ts >= ? AND (iface IN ('ppp0', 'eth0')
+        f"""SELECT ts, unit, iface, rx_bytes, tx_bytes, rx_packets, tx_packets FROM iface_counters
+           WHERE ts >= ? AND (iface IN ({', '.join('?' for _ in wan)})
                  OR ((iface LIKE 'ra%' OR iface LIKE 'at%') AND iface NOT LIKE '%.%'))
-           ORDER BY ts""", (since,)))
+           ORDER BY ts""", (since, *wan)))
 
 
 def radio_samples_since(since: float) -> list[dict[str, Any]]:

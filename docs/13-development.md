@@ -62,6 +62,7 @@ Never point a test instance at the live data folder: the running tray app owns i
 | `meshlens/collectors/probes.py` | ESP32 probes: discovery, pairing, polling, storage, Probes page data |
 | `meshlens/web/static/guidance.js` | Step-by-step links, "check it worked", grouping, checklist, hidden issues, marked changes |
 | `meshlens/integrations.py` | Read-only connection tests for Pi-hole, Home Assistant, UniFi |
+| `meshlens/collectors/switches.py` | Managed switches: UniFi (controller API) and TP-Link Easy Smart (web page) port counters, devices per port |
 | `meshlens/engine.py` | Background scheduler, retention |
 | `meshlens/web/` | aiohttp server, login, JSON API, static UI, `static/help.html` (in-app help) |
 | `meshlens/tray.py` | System tray icon |
@@ -89,7 +90,8 @@ Never point a test instance at the live data folder: the running tray app owns i
 | Topology map | TOP-01, MAP-01/02 | Done (tree view; per-port switch mapping needs the switch collectors) |
 | Latency / jitter / loss monitors, speed tests, bufferbloat | TST-01/02/03/05, ISP-05 | Done |
 | Tray status colour, start with Windows, installer, CI, release workflow | UI-06, NFR-01 | Done |
-| Next | Pi-hole / HA / UniFi / TP-Link switch collectors, reports, timeline, IPv6, rogue AP/DHCP checks | Not started |
+| Traffic | Internet traffic on the physical WAN port, per-device internet use (estimate), BD4 station bytes, Traffic Analyzer apps, switch port traffic | Done (UniFi and Easy Smart readers not yet run against real switches) |
+| Next | Pi-hole / HA collectors, reports, timeline, IPv6, rogue AP/DHCP checks | Not started |
 | Probes | ESP32 probes: discovery, pairing, room, Wi-Fi scans, air monitor, alerts, channel plan (see 04-esp32-probes.md) | First version; probe sync, tests, airtime, push: markbac/esp32 #5-#9 |
 | Guidance | Step-by-step fixes, check-it-worked, glossary, setup checklist, marked changes with before/after, issue history, hiding | Done |
 

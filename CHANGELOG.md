@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased: traffic
+
+- **Internet traffic counted correctly** (#17): the Internet traffic graph and the diagram's "now ↓/↑" use the router's
+  physical internet port (eth1 on the BT8) with Ethernet/PPPoE headers taken off, instead of `ppp0`. With hardware acceleration,
+  ppp0 missed almost everything: a 200 MB download added 0.4 MB to it and 212 MB to eth1. The note under the graph says
+  which counter is used. Older history is redrawn from eth1 too.
+- **Top internet users** (#18): how much each device downloaded and uploaded in the period (Graphs tab), its internet use in
+  its own graphs, daily totals kept for 12 months, new **internet** and **internet_daily** export datasets, and an info note
+  when one device uses most of the line for an hour. Estimates from the router's connection table.
+- **Data used for devices on BD4 units** (#19): byte counters per station now come from `apstats`, so the device graphs'
+  "Data used over Wi-Fi" works on Qualcomm units too.
+- **ASUS Traffic Analyzer** (#20): if you have turned it on in the router, each device's graphs list the apps it used.
+  MeshLens never turns it on; Help explains the trade-off.
+- **Traffic inside the house per switch port** (#21): UniFi switches (through the controller; with which devices are on
+  each port) and TP-Link Easy Smart switches (packets per port), every 5 minutes, with errors reported like router port
+  errors. A device on a UniFi port gets a "Traffic at its switch port" graph.
+
 ## 0.9.3 — 20 November 2026
 
 - **Updates are marked as changes automatically**: when MeshLens is updated, and when a mesh unit's firmware changes, a change

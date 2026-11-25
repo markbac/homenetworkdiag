@@ -73,6 +73,13 @@ def parse_unit(text: str, mac: str, ip: str, main: bool) -> UnitResult:
             st = P.parse_mwctl_stat(body)
             if st:
                 r.radios.append({"iface": iface, "band": P.band_of_iface(iface, r.bands), **st})
+    if "apstats_sta" in s:
+        # Qualcomm units: byte counters per station come from apstats (wlanconfig has none).
+        counts = P.parse_apstats_sta(s["apstats_sta"])
+        for st in r.stations:
+            c = counts.get(st["mac"])
+            if c and st.get("tx_bytes") is None:
+                st.update({k: c[k] for k in ("tx_bytes", "rx_bytes", "tx_packets", "rx_packets") if k in c})
     for st in r.stations:
         if st.get("iface") and r.bands:
             st["band"] = P.band_of_iface(st["iface"], r.bands) or st.get("band")
@@ -112,6 +119,7 @@ class AsusCollector:
         self.prev_cpu: dict[str, dict[str, list[int]]] = {}   # last /proc/stat per unit, for CPU %
         self.prev_links: dict[str, dict[str, dict[str, Any]]] = {}   # carrier_changes per unit/iface
         self.prev_chan: dict[str, dict[str, tuple]] = {}          # channel/width per unit/band
+        self.prev_flows: tuple[float, dict[str, tuple[str, int, int]]] | None = None   # internet connections, last poll
         self.status: dict[str, Any] = {"last_poll": None, "units": {}, "error": None}
 
     # ------------------------------------------------------------ polling
@@ -300,6 +308,23 @@ class AsusCollector:
                 if fields:
                     db.set_device_fields(st["mac"], **fields)
 
+        # Internet bytes per device since the last poll (estimate, from the connection table).
+        if "inet_flows" in s:
+            self._store_inet(P.parse_inet_flows(s["inet_flows"]), now)
+
+        # ASUS Traffic Analyzer (read only when the user has it on): per device and app, hourly.
+        if "ta_traffic" in s:
+            if P.ta_schema_ok(s.get("ta_schema", "")):
+                rows = P.parse_ta_traffic(s["ta_traffic"])
+                db.store_app_traffic(rows)
+                main.info["traffic_analyzer"] = {"state": "read", "rows": len(rows), "ts": now}
+            else:
+                main.info["traffic_analyzer"] = {"state": "unknown_format", "ts": now}
+                jsonl.append(self.data_root, {"type": "asus_unit", "unit": main.mac,
+                                              "raw_unparsed": {"ta_schema": s.get("ta_schema", "")[:2000]}})
+        elif full:
+            main.info["traffic_analyzer"] = {"state": "off", "ts": now}
+
         # Address pool and connections per device (main router, full polls).
         if full and "conn_counts" in s:
             counts = P.parse_conn_counts(s["conn_counts"])
@@ -312,9 +337,23 @@ class AsusCollector:
             pool = P.dhcp_pool(main.settings, len(P.parse_leases(s["leases"])))
             if pool:
                 main.info["dhcp"] = pool
-        if full and (main.info.get("conn_top") is not None or main.info.get("dhcp")):
+        if full and (main.info.get("conn_top") is not None or main.info.get("dhcp") or main.info.get("traffic_analyzer")):
             db.upsert_unit(main.mac, info=json.dumps({**main.info, "ts": now, "system": (db.units() and next(
                 (u.get("info") or {}).get("system") for u in db.units() if u["mac"] == main.mac)) or {}}, default=str))
+
+    def _store_inet(self, flows: dict[str, tuple[str, int, int]], now: float) -> None:
+        prev = self.prev_flows
+        # After a long gap the growth can't be placed in time: start again from this poll.
+        base = prev[1] if prev and 0 < now - prev[0] <= 900 else None
+        # An empty table (no internet address yet, or the read failed) must not make every later connection "new".
+        self.prev_flows = (now, flows) if flows else None
+        per = P.flow_deltas(base, flows)
+        if not per or prev is None:
+            return
+        by_ip = {d["ip"]: d["mac"] for d in db.devices() if d.get("ip")}
+        db.insert_many("device_traffic", [
+            {"ts": now, "secs": round(now - prev[0], 1), "ip": ip, "mac": by_ip.get(ip), "bytes_in": b[0], "bytes_out": b[1]}
+            for ip, b in per.items()])
 
     def _derived_events(self, r: UnitResult, links: dict[str, dict[str, Any]], now: float) -> list[dict[str, Any]]:
         """Events MeshLens works out by comparing polls: wired link up/down, channel changes, new internet address."""

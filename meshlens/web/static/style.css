@@ -209,3 +209,5 @@ td.wrap { overflow-wrap: anywhere; }
 .chart-box.zoomable { cursor: zoom-in; }
 .modal-card.wide { max-width: min(1400px, 96vw); }
 .chart-zoom-box { min-height: 200px; }
+.sharebar { display: inline-block; width: 60px; height: 8px; background: var(--line, #8883); border-radius: 4px; vertical-align: middle; overflow: hidden; }
+.sharebar i { display: block; height: 100%; background: var(--c1); }

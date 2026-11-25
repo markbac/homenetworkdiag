@@ -8,7 +8,9 @@ service or triggers a radio scan. Secrets are never read: there is no
 from __future__ import annotations
 
 IDENTITY_KEYS = ["productid", "odmpid", "firmver", "buildno", "extendno", "lan_ipaddr", "lan_netmask",
-                 "sw_mode", "re_mode", "cfg_master", "wl_ifnames", "sta_ifnames", "lan_ifnames"]
+                 "sw_mode", "re_mode", "cfg_master", "wl_ifnames", "sta_ifnames", "lan_ifnames",
+                 # Internet port and type: which counters measure internet traffic, and which connections are internet.
+                 "wan0_ifname", "wan0_gw_ifname", "wan0_proto", "wan0_ipaddr"]
 
 # Settings that matter for diagnosis (docs/05-asus-aimesh.md, "Settings found that matter").
 _BAND_KEYS = ["ifname", "ssid", "closed", "chanspec", "channel", "bw", "mrate_x", "igs", "user_rssi", "rateset",
@@ -23,6 +25,9 @@ SETTINGS_KEYS = (
        "qos_enable", "qos_type", "qos_obw", "qos_ibw", "bwdpi_db_enable", "webs_state_flag", "webs_state_info"]
 )
 
+TA_DB = "/jffs/.sys/TrafficAnalyzer/TrafficAnalyzer.db"   # ASUS Traffic Analyzer statistics (when the user enables it)
+APSTATS_MAX = 48    # stations per Qualcomm unit per poll whose byte counters are read with apstats
+
 TOOLS = ["wl", "iw", "iwpriv", "iwconfig", "mwctl", "hostapd_cli", "wlanconfig", "cfg80211tool", "apstats"]
 
 LOG_PATTERN = ("hapdevent|roamast|ieee80211_node_leave|assoc failed with status"
@@ -30,6 +35,15 @@ LOG_PATTERN = ("hapdevent|roamast|ieee80211_node_leave|assoc failed with status"
                "|Radar found|Changing to DFS|trigger acs|current \\[reboot\\]"
                "|no address range available|DHCPNAK|nf_conntrack: table full|possible SYN flooding|Out of memory"
                "|oom-killer|segfault|Kernel panic|Unable to handle kernel|hung_task|BUG: ")
+
+
+INET_FLOWS_AWK = (
+    "awk -v w=\"$(nvram get wan0_ipaddr)\" '{ n=0; rd=\"\"; sp=\"\"; dp=\"\"; for (i=1; i<=NF; i++) { split($i, a, \"=\"); "
+    "if (a[1]==\"src\") { n++; if (n==1) s=a[2] } else if (a[1]==\"dst\") { if (n==2) rd=a[2]; else d=a[2] } "
+    "else if (a[1]==\"sport\" && n==1) sp=a[2]; else if (a[1]==\"dport\" && n==1) dp=a[2]; "
+    "else if (a[1]==\"bytes\") { if (n==1) b1=a[2]; else b2=a[2] } } "
+    "if (w != \"\" && rd==w) print $3\"|\"s\"|\"d\"|\"sp\"|\"dp\"|\"b1\"|\"b2 }' /proc/net/nf_conntrack 2>/dev/null"
+)
 
 
 def _nvram_block(key: str, keys: list[str]) -> str:
@@ -70,6 +84,13 @@ def unit_script(main: bool, first_poll: bool, full: bool) -> str:
         # Qualcomm: stations per VAP.
         'if which wlanconfig >/dev/null 2>&1; then for i in $(ls /sys/class/net | grep -E "^ath[0-9]{3}$"); do '
         'echo "@@@ sta_wlanconfig:$i"; wlanconfig $i list sta 2>/dev/null; done; fi',
+        # Qualcomm: data bytes per station (wlanconfig has none). Only for stations listed above, at most
+        # APSTATS_MAX per poll, and only the byte/packet lines leave the unit. Display-only (D-34).
+        'if which wlanconfig >/dev/null 2>&1 && which apstats >/dev/null 2>&1; then echo "@@@ apstats_sta"; n=0; '
+        'for i in $(ls /sys/class/net | grep -E "^ath[0-9]{3}$"); do '
+        "for m in $(wlanconfig $i list sta 2>/dev/null | awk 'NR>1 && $1 ~ /^([0-9a-f][0-9a-f]:){5}[0-9a-f][0-9a-f]$/ "
+        "{print $1}'); do n=$((n+1)); [ $n -gt " + str(APSTATS_MAX) + " ] && break 2; apstats -s -m $m 2>/dev/null "
+        '| grep -E "^(Node Level Stats|(Tx|Rx) Data (Bytes|Packets) +=)"; done; done; fi',
     ]
     if full:
         lines.append(_nvram_block("settings", SETTINGS_KEYS))
@@ -85,6 +106,10 @@ def unit_script(main: bool, first_poll: bool, full: bool) -> str:
             # The mesh controller's own record of every node (address, model, firmware, online, signal) - it
             # includes nodes missing from cfg_device_list (e.g. ones whose settings sync is incomplete).
             'echo "@@@ cfgmnt"; cat /tmp/cfgmnt_log.txt 2>/dev/null; echo',
+            # Internet connections and their byte counters (nf_conntrack accounting), for per-device internet use.
+            # Only connections whose reply comes back to the WAN address; only "proto|src|dst|sport|dport|out|in"
+            # lines leave the router. Read-only.
+            'echo "@@@ inet_flows"; ' + INET_FLOWS_AWK,
         ]
         if full:
             lines += [
@@ -97,5 +122,12 @@ def unit_script(main: bool, first_poll: bool, full: bool) -> str:
                 'echo "@@@ port_status"; cat /tmp/diag_port_status.json 2>/dev/null; echo',
                 # Results of speed tests already run on the router (ASUS app / web UI). Read-only.
                 'echo "@@@ ookla_history"; cat /jffs/.sys/OOKLA/ookla_history 2>/dev/null; echo',
+                # ASUS Traffic Analyzer statistics, only if the user has turned the feature on (MeshLens never does).
+                # Read-only query of its database on the router; only hourly totals per device and app leave it.
+                f'if [ -f {TA_DB} ] && which sqlite3 >/dev/null 2>&1; then echo "@@@ ta_schema"; '
+                f'sqlite3 -readonly {TA_DB} "PRAGMA table_info(traffic);" 2>&1 | head -n 20; echo "@@@ ta_traffic"; '
+                f'sqlite3 -readonly -separator "|" {TA_DB} "SELECT mac, app_name, cat_name, (timestamp / 3600) * 3600, '
+                "SUM(tx), SUM(rx) FROM traffic WHERE timestamp >= strftime('%s', 'now') - 93600 GROUP BY 1, 2, 3, 4;\" "
+                '2>&1 | head -n 6000; fi',
             ]
     return "\n".join(lines) + "\n"
