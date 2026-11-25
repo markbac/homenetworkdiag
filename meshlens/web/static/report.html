@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MeshLens network report</title>
+<link rel="icon" href="/icon-192.png">
+<link rel="stylesheet" href="/static/style.css">
+<script src="/static/charts.js" defer></script>
+<script src="/static/map.js" defer></script>
+<script src="/static/report.js" defer></script>
+</head>
+<body class="report">
+<div class="rp-bar no-print">
+  <b>MeshLens report</b>
+  <label>Period <select id="rp-hours">
+    <option value="24" selected>last 24 hours</option><option value="168">last 7 days</option><option value="720">last 30 days</option></select></label>
+  <label>Devices <select id="rp-devs">
+    <option value="7" selected>seen in the last 7 days</option><option value="online">online now</option><option value="all">all ever seen</option></select></label>
+  <label><input type="checkbox" id="rp-low"> Include low and info issues</label>
+  <label><input type="checkbox" id="rp-expand"> Diagram lists every device</label>
+  <button id="rp-print" disabled>Save as PDF</button>
+  <span id="rp-status" class="muted small"></span>
+  <a href="/" class="small" style="margin-left:auto">← Back to MeshLens</a>
+</div>
+<p class="no-print muted small rp-hint">“Save as PDF” opens the print window: choose <b>Save as PDF</b> (or Microsoft Print to PDF) as the printer.
+  Tick <b>Background graphics</b> under More settings to keep the colours.</p>
+<main id="report"></main>
+</body>
+</html>

@@ -1,7 +1,11 @@
 # Changelog
 
-## Unreleased: traffic
+## Unreleased
 
+- **PDF report**: 📄 Report (top right) opens a printable report of the whole network (health, issues with what to try,
+  every router and mesh unit with firmware, channels, radio health and ports, the network diagram on a landscape page,
+  all the graphs, every device grouped by unit, stability, speed tests, changes, powerline and probes). Choose the period
+  and which devices to list, then Save as PDF from the browser's print window.
 - **Internet traffic counted correctly** (#17): the Internet traffic graph and the diagram's "now ↓/↑" use the router's
   physical internet port (eth1 on the BT8) with Ethernet/PPPoE headers taken off, instead of `ppp0`. With hardware acceleration,
   ppp0 missed almost everything: a 200 MB download added 0.4 MB to it and 212 MB to eth1. The note under the graph says

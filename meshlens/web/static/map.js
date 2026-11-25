@@ -191,10 +191,25 @@ const MapView = (() => {
     img.src = url;
   }
 
-  return { load, zoom, download, expandAll };
+  /** The diagram as SVG markup for a topology, drawn at full size (used by the printable report). */
+  function svgFor(t, { expand = false } = {}) {
+    const keep = new Set(expanded), oldScale = scale;
+    try {
+      const byId = build(t), root = byId.internet;
+      if (!root) return "";
+      expanded.clear();
+      if (expand) Object.values(byId).forEach((n) => { if (n.kind !== "device" && n._devs.length) expanded.add(n.id); });
+      scale = 1;
+      measure(root, t); place(root, 0, 0);
+      return svg(root, t);
+    } finally { expanded.clear(); keep.forEach((x) => expanded.add(x)); scale = oldScale; }
+  }
+
+  return { load, zoom, download, expandAll, svgFor };
 })();
 
 document.addEventListener("DOMContentLoaded", () => {
+  if (!document.getElementById("topo-map")) return;      // the report page uses MapView.svgFor only
   let view = "diagram";
   try { view = localStorage.getItem("meshlens.mapView") || "diagram"; } catch (err) { /* private mode */ }
   const setView = (v) => {

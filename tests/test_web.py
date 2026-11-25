@@ -189,3 +189,14 @@ def test_update_endpoints(tmp_home):
             assert info["available"] and info["latest"] == "9.9.9"
             assert (await c.post("/api/update/install", json={})).status == 200
     run(scenario())
+
+
+def test_report_page_is_served_and_needs_login_for_data(tmp_home):
+    async def scenario():
+        async with TestClient(TestServer(build_app(FakeEngine(), Auth(tmp_home / "web_auth.json")))) as c:
+            r = await c.get("/report")
+            html = await r.text()
+            assert r.status == 200 and "report.js" in html and "map.js" in html and r.headers["Cache-Control"] == "no-cache"
+            assert (await c.get("/static/report.js")).status == 200
+            assert (await c.get("/api/analysis")).status == 401        # the page itself holds no data
+    run(scenario())
