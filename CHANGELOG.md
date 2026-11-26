@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.9.4 — 26 November 2026
 
 - **PDF report**: 📄 Report (top right) opens a printable report of the whole network (health, issues with what to try,
   every router and mesh unit with firmware, channels, radio health and ports, the network diagram on a landscape page,
