@@ -12,6 +12,7 @@ from typing import Any
 from . import config as config_mod
 from . import analysis, channels, oui, secrets, topology, updater
 from .collectors.asus.collector import AsusCollector
+from .collectors import switches
 from .collectors.devolo import DevoloCollector
 from .collectors.probes import ProbeCollector
 from .discovery import Discovery
@@ -32,6 +33,7 @@ class Engine:
         self.asus = AsusCollector(cfg.router, self.root)
         self.devolo = DevoloCollector(cfg.devolo, self.root)
         self.probes = ProbeCollector(cfg.probes, self.root)
+        self.switches = switches.SwitchCollector(lambda: self.cfg, self.root)
         self.discovery = Discovery(lambda: self.cfg, self.root)
         self.monitor = PingMonitor(cfg.monitor, self._ping_targets)
         self.host = HostMonitor()
@@ -122,7 +124,8 @@ class Engine:
                "analysis_cfg": self.cfg.analysis, "pings": db.ping_minutes(since), "speeds": db.speed_tests(now - 7 * 86400),
                "unit_names": {u["mac"]: u.get("alias") or u.get("model") or u["mac"] for u in db.units()},
                "plc_adapters": db.plc_adapters(), "plc_rates": db.plc_latest_rates(), "open_ports": db.open_ports(),
-               "inventory": db.inventory_events(since), "monitor_cfg": self.cfg.monitor, "devolo_cfg": self.cfg.devolo}
+               "inventory": db.inventory_events(since), "monitor_cfg": self.cfg.monitor, "devolo_cfg": self.cfg.devolo,
+               "inet_hour": db.device_traffic_totals(now - 3600), "switch_ports": switches.series(db.switch_ports_since(since), {})["ports"]}
         res = analysis.analyse(db.events(since, limit=200000), db.station_samples_since(since), db.latest_radio(),
                                db.units(), db.devices(), db.latest_settings(), self.cfg.analysis, now, net=net,
                                hidden=[(h["rule"], h["subject"]) for h in db.hidden_issues()])
@@ -261,7 +264,8 @@ class Engine:
                                                      "temperature": r.get("temperature")})
         units = db.units()
         router = next((u["mac"] for u in units if u.get("role") == "router"), None)
-        wan = graphs.throughput(db.throughput_counters(now - 600), {}, router)["wan"]
+        ws = graphs.wan_source(units)
+        wan = graphs.throughput(db.throughput_counters(now - 600, [ws["phys"]]), {}, router, ws)["wan"]
         t["summary"] = {
             "speed": speeds[-1] if speeds else None,
             "latency": [{"label": x["label"], "kind": x["kind"], "avg_ms": x["avg_ms"],
@@ -400,6 +404,7 @@ class Engine:
             end = time.mktime((d + dt.timedelta(days=1)).timetuple())
             db.rollup_day(d.isoformat(), start, end,
                           lambda k, r, dc, rssi: analysis.device_score(k, r, dc, rssi))
+            db.rollup_traffic_day(d.isoformat(), start, end)
 
     def router_password(self) -> str | None:
         r = self.cfg.router
@@ -416,6 +421,7 @@ class Engine:
             "asus": self.asus.status,
             "devolo": self.devolo.status,
             "probes": self.probes.status,
+            "switches": self.switches.status,
             "discovery": self.discovery.status,
             "speedtest": {"running": self.speed_status["running"], "router_running": self.speed_status["router_running"],
                           "router_enabled": self.cfg.monitor.router_speedtest},
@@ -424,7 +430,7 @@ class Engine:
             "integrations": {s: {"enabled": getattr(self.cfg, s).enabled,
                                  "secret_set": bool(getattr(self.cfg, s).url) and
                                  secrets.has_secret(secrets.SERVICE_KINDS[s], secrets.service_ident(s, self.cfg)),
-                                 "collector": "not yet implemented"}
+                                 "collector": "switch ports every 5 minutes" if s == "unifi" else "not yet implemented"}
                              for s in ("pihole", "homeassistant", "unifi")},
         }
 
@@ -462,6 +468,11 @@ class Engine:
                         self.devolo.poll()
                     except Exception:
                         log.exception("devolo poll crashed")
+                if self.switches.due(time.time()):
+                    try:
+                        self.switches.poll()
+                    except Exception:
+                        log.exception("switch poll crashed")
                 if self.probes.due(time.time()):
                     try:
                         self.probes.poll()

@@ -37,6 +37,7 @@ def build_app(engine: Engine, auth: Auth) -> web.Application:
     app[ENGINE], app[AUTH] = engine, auth
     r = app.router
     r.add_get("/", index)
+    r.add_get("/report", report_page)
     r.add_static("/static", STATIC)
     r.add_get("/api/auth/state", auth_state)
     r.add_post("/api/auth/setup", auth_setup)
@@ -97,6 +98,11 @@ async def index(request: web.Request) -> web.FileResponse:
     return web.FileResponse(STATIC / "index.html")
 
 
+async def report_page(request: web.Request) -> web.FileResponse:
+    """Printable report of the whole network; the browser saves it as a PDF. Its data comes from the (logged-in) API."""
+    return web.FileResponse(STATIC / "report.html")
+
+
 @web.middleware
 async def _security(request: web.Request, handler):
     path = request.path
@@ -112,7 +118,7 @@ async def _security(request: web.Request, handler):
     resp.headers["Content-Security-Policy"] = "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
     if path.startswith("/api/"):
         resp.headers["Cache-Control"] = "no-store"
-    elif path == "/" or path.startswith("/static/"):
+    elif path in ("/", "/report") or path.startswith("/static/"):
         resp.headers["Cache-Control"] = "no-cache"   # revalidate, so a new version's pages load right after an update
     return resp
 

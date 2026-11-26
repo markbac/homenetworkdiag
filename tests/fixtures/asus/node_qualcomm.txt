@@ -39,3 +39,14 @@ Nov 12 17:22:13 roamast: ath001: disconnect weak signal strength station [02:aa:
 @@@ sta_wlanconfig:ath001
 ADDR               AID CHAN TXRATE RXRATE RSSI MINRSSI MAXRSSI IDLE  TXSEQ  RXSEQ  CAPS XCAPS ACAPS     ERP    STATE MAXRATE(DOT11) HTCAPS   VHTCAPS ASSOCTIME    IEs   MODE
 02:aa:00:00:00:05    1   11  72M     58M  -50     -58     -44   17      0   65535  EPSs  NULL NULL    0          f          96000               P            0gRS 08:11:46 RSN WME IEEE80211_MODE_11AXG_HE20
+@@@ apstats_sta
+Node Level Stats: 02:aa:00:00:00:05 (under VAP ath001)
+Tx Data Packets                 = 232883
+Tx Data Bytes                   = 276122973
+Rx Data Packets                 = 32731
+Rx Data Bytes                   = 7912804
+Node Level Stats: 02:aa:00:00:00:99 (under VAP ath101)
+Tx Data Packets                 = 3
+Tx Data Bytes                   = 499
+Rx Data Packets                 = 0
+Rx Data Bytes                   = 0

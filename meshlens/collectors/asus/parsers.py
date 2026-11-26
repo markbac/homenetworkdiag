@@ -521,6 +521,95 @@ def parse_wlanconfig_list_sta(text: str, iface: str) -> list[dict[str, Any]]:
     return out
 
 
+def parse_inet_flows(text: str) -> dict[str, tuple[str, int, int]]:
+    """``inet_flows`` lines ``proto|src|dst|sport|dport|bytes_out|bytes_in`` -> {key: (local src, out, in)}.
+
+    ``out`` is the original direction (device -> internet), ``in`` the reply direction.
+    """
+    out: dict[str, tuple[str, int, int]] = {}
+    for line in text.splitlines():
+        f = line.strip().split("|")
+        if len(f) != 7 or not f[1] or not f[5].isdigit() or not f[6].isdigit():
+            continue
+        key = "|".join(f[:5])
+        prev = out.get(key)
+        b_out, b_in = int(f[5]), int(f[6])
+        if prev:      # same 5-tuple listed twice (ICMP without ports): add them up
+            b_out, b_in = prev[1] + b_out, prev[2] + b_in
+        out[key] = (f[1], b_out, b_in)
+    return out
+
+
+def flow_deltas(prev: dict[str, tuple[str, int, int]] | None,
+                cur: dict[str, tuple[str, int, int]]) -> dict[str, list[int]]:
+    """Bytes per local address since the previous poll: {ip: [bytes_in, bytes_out]}.
+
+    Summing table totals doesn't work (connections close between polls, so totals fall). Instead each
+    connection's growth since the last poll is counted; a connection not seen before counts in full; a counter
+    that went down means the 5-tuple was reused by a new connection, so it counts in full too. Connections that
+    open and close between two polls are missed (an underestimate). With no previous poll nothing is counted.
+    """
+    if prev is None:
+        return {}
+    per: dict[str, list[int]] = {}
+    for key, (src, b_out, b_in) in cur.items():
+        p = prev.get(key)
+        if p is None or b_out < p[1] or b_in < p[2]:
+            d_out, d_in = b_out, b_in
+        else:
+            d_out, d_in = b_out - p[1], b_in - p[2]
+        if d_out or d_in:
+            t = per.setdefault(src, [0, 0])
+            t[0] += d_in
+            t[1] += d_out
+    return per
+
+
+TA_COLUMNS = {"mac", "app_name", "cat_name", "timestamp", "tx", "rx"}
+
+
+def ta_schema_ok(text: str) -> bool:
+    """``PRAGMA table_info(traffic)`` output (``cid|name|type|notnull|dflt|pk``) has the columns the query uses."""
+    cols = {f[1] for f in (line.split("|") for line in text.splitlines()) if len(f) >= 3}
+    return TA_COLUMNS <= cols
+
+
+def parse_ta_traffic(text: str) -> list[dict[str, Any]]:
+    """ASUS Traffic Analyzer hourly totals ``mac|app|category|hour|tx|rx`` (tx = sent by the device)."""
+    out = []
+    for line in text.splitlines():
+        f = line.strip().split("|")
+        if len(f) != 6 or not re.fullmatch(MAC_RE, f[0].strip()) or not f[3].isdigit():
+            continue
+        try:
+            tx, rx = int(f[4] or 0), int(f[5] or 0)
+        except ValueError:
+            continue
+        out.append({"hour": int(f[3]), "mac": norm_mac(f[0].strip()), "app": f[1] or "Unknown",
+                    "category": f[2] or None, "bytes_out": tx, "bytes_in": rx})
+    return out
+
+
+def parse_apstats_sta(text: str) -> dict[str, dict[str, Any]]:
+    """Qualcomm ``apstats -s -m <mac>`` (STA level), filtered to the header and the data byte/packet lines.
+
+    ``Tx`` is from the access point's side (data sent to the device), as with hostapd's ``tx_bytes``.
+    """
+    out: dict[str, dict[str, Any]] = {}
+    cur: dict[str, Any] | None = None
+    keys = {"Tx Data Bytes": "tx_bytes", "Rx Data Bytes": "rx_bytes", "Tx Data Packets": "tx_packets",
+            "Rx Data Packets": "rx_packets"}
+    for line in text.splitlines():
+        m = re.match(r"Node Level Stats:\s*(" + MAC_RE + r")(?:.*under VAP (\S+?)\))?", line.strip())
+        if m:
+            cur = out.setdefault(norm_mac(m.group(1)), {"iface": m.group(2)})
+            continue
+        m = re.match(r"((?:Tx|Rx) Data (?:Bytes|Packets))\s+=\s*(\d+)\s*$", line.strip())
+        if m and cur is not None:
+            cur[keys[m.group(1)]] = int(m.group(2))
+    return out
+
+
 # ---------------------------------------------------------------- radio health
 
 def parse_mwctl_stat(text: str) -> dict[str, Any]:

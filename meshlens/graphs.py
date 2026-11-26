@@ -9,6 +9,7 @@ from collections import defaultdict
 from typing import Any
 
 from .collectors.asus.parsers import band_of_iface
+from .collectors.switches import series as switch_series
 
 
 def bucket_size(hours: float) -> int:
@@ -57,21 +58,48 @@ def rssi_histogram(latest: list[dict[str, Any]], now: float) -> list[dict[str, A
     return [{"from": e, "to": e + 5, "count": counts.get(e, 0)} for e in edges[:-1]]
 
 
-def throughput(counters: list[dict[str, Any]], unit_names: dict[str, str], router_mac: str | None) -> dict[str, Any]:
-    """Mbit/s from byte counters: the router's internet link, and Wi-Fi per unit and band."""
+def wan_source(units: list[dict[str, Any]]) -> dict[str, Any]:
+    """The main router's internet port and connection type, from its identity (read every poll)."""
+    r = next((u for u in units if u.get("role") == "router"), None)
+    ident = ((r or {}).get("info") or {}).get("identity") or {}
+    return {"phys": ident.get("wan0_ifname") or None, "logical": ident.get("wan0_gw_ifname") or None,
+            "proto": ident.get("wan0_proto") or None}
+
+
+# Bytes a physical internet port counts per packet that the IP layer (ppp0) doesn't: the Ethernet header (14),
+# plus the PPPoE header and PPP protocol field (8) on PPPoE lines.
+ETH_OVERHEAD = 14
+PPPOE_OVERHEAD = 8
+
+
+def throughput(counters: list[dict[str, Any]], unit_names: dict[str, str], router_mac: str | None,
+               wan: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Mbit/s from byte counters: the router's internet link, and Wi-Fi per unit and band.
+
+    Internet: the physical internet port (e.g. eth1) when known, because on routers with hardware NAT acceleration
+    (MediaTek BT8) offloaded packets never pass ppp0's counters; its per-packet header overhead is taken off so the
+    figures are IP traffic like ppp0's. Falls back to ppp0, then eth0.
+    """
     rows = defaultdict(list)
     for c in counters:
         rows[(c["unit"], c["iface"])].append(c)
-    wan_if = None
+    wan = wan or {}
+    wan_if, overhead = None, 0
     if router_mac:
         ifs = {i for (u, i) in rows if u == router_mac}
-        wan_if = "ppp0" if "ppp0" in ifs else ("eth0" if "eth0" in ifs else None)
-    wan = {"Download": [], "Upload": []}
+        phys = wan.get("phys")
+        if phys and phys in ifs and phys != "ppp0":
+            wan_if = phys
+            overhead = ETH_OVERHEAD + (PPPOE_OVERHEAD if (wan.get("proto") or "").lower() == "pppoe" else 0)
+        else:
+            wan_if = "ppp0" if "ppp0" in ifs else ("eth0" if "eth0" in ifs else None)
+    wan_pts = {"Download": [], "Upload": []}
     wifi: dict[str, dict[float, float]] = defaultdict(lambda: defaultdict(float))
     for (unit, iface), rs in rows.items():
         rs.sort(key=lambda r: r["ts"])
         band = band_of_iface(iface)
         is_wifi = band and iface[:2] in ("ra", "at") and "." not in iface and not iface.startswith("apcli")
+        is_wan = unit == router_mac and iface == wan_if
         for a, b in zip(rs, rs[1:]):
             dt = b["ts"] - a["ts"]
             if dt <= 0 or dt > 900:
@@ -79,14 +107,61 @@ def throughput(counters: list[dict[str, Any]], unit_names: dict[str, str], route
             drx, dtx = b["rx_bytes"] - a["rx_bytes"], b["tx_bytes"] - a["tx_bytes"]
             if drx < 0 or dtx < 0:          # counter reset (reboot)
                 continue
+            if is_wan and overhead and a.get("rx_packets") is not None and b.get("rx_packets") is not None:
+                drx = max(0, drx - overhead * max(0, b["rx_packets"] - a["rx_packets"]))
+                dtx = max(0, dtx - overhead * max(0, (b.get("tx_packets") or 0) - (a.get("tx_packets") or 0)))
             rx, tx = drx * 8 / dt / 1e6, dtx * 8 / dt / 1e6
-            if unit == router_mac and iface == wan_if:
-                wan["Download"].append([b["ts"], round(rx, 2)])
-                wan["Upload"].append([b["ts"], round(tx, 2)])
+            if is_wan:
+                wan_pts["Download"].append([b["ts"], round(rx, 2)])
+                wan_pts["Upload"].append([b["ts"], round(tx, 2)])
             elif is_wifi:
                 wifi[f"{unit_names.get(unit, unit)} {band} GHz"][round(b["ts"] / 60) * 60] += rx + tx
-    return {"wan": wan, "wan_iface": wan_if,
+    if wan_if and wan_if == wan.get("phys"):
+        note = (f"Counted on the router's internet port ({wan_if}), so traffic the router's hardware acceleration "
+                f"handles is included; Ethernet{' and PPPoE' if overhead > ETH_OVERHEAD else ''} headers are taken off. "
+                "Averaged per poll.")
+    elif wan_if:
+        note = f"Router interface {wan_if}, averaged per poll."
+        if wan_if == "ppp0":
+            note += " On routers with hardware acceleration this can miss most traffic."
+    else:
+        note = ""
+    return {"wan": wan_pts, "wan_iface": wan_if, "wan_note": note,
             "wifi": {k: [[t, round(v, 2)] for t, v in sorted(d.items())] for k, d in sorted(wifi.items())}}
+
+
+def top_users(totals: list[dict[str, Any]], devices: dict[str, dict[str, Any]], router_ip: str | None = None,
+              limit: int = 15) -> dict[str, Any]:
+    """Internet use per device in a period, biggest first (estimates from the router's connection table)."""
+    from .names import display_name
+    total = sum((t["bytes_in"] or 0) + (t["bytes_out"] or 0) for t in totals) or 0
+    rows = []
+    for t in totals:
+        b = (t["bytes_in"] or 0) + (t["bytes_out"] or 0)
+        if not b:
+            continue
+        d = devices.get(t["mac"]) if t.get("mac") else None
+        if d:
+            name = display_name(d, t["mac"])
+        elif t.get("ip") and t["ip"] == router_ip:
+            name = "Router itself"
+        else:
+            name = f"Unknown device ({t.get('ip') or t.get('last_ip') or '?'})"
+        rows.append({"mac": t.get("mac"), "ip": (d or {}).get("ip") or t.get("ip") or t.get("last_ip"), "name": name,
+                     "down_bytes": t["bytes_in"] or 0, "up_bytes": t["bytes_out"] or 0, "total_bytes": b,
+                     "share_pct": round(100 * b / total, 1) if total else None})
+    rows.sort(key=lambda r: -r["total_bytes"])
+    return {"rows": rows[:limit], "total_bytes": total, "devices": len(rows)}
+
+
+def inet_rates(history: list[dict[str, Any]]) -> dict[str, list[list[float]]]:
+    """Mbit/s per poll from per-poll byte counts (one device)."""
+    down, up = [], []
+    for r in history:
+        if r.get("secs"):
+            down.append([r["ts"], round((r["bytes_in"] or 0) * 8 / r["secs"] / 1e6, 3)])
+            up.append([r["ts"], round((r["bytes_out"] or 0) * 8 / r["secs"] / 1e6, 3)])
+    return {"Download": down, "Upload": up}
 
 
 def radio_errors(rows: list[dict[str, Any]], unit_names: dict[str, str]) -> dict[str, list[list[float]]]:
@@ -191,12 +266,16 @@ def collect(hours: float) -> dict[str, Any]:
             names[m] = u.get("alias") or u.get("model") or u["mac"]
     router = next((u["mac"] for u in units if u.get("role") == "router"), None)
     pings = db.ping_minutes(since)
+    router_ip = next((((u.get("info") or {}).get("identity") or {}).get("wan0_ipaddr") for u in units
+                      if u.get("role") == "router"), None)
     return {
         "hours": hours, "bucket": b, "generated": now,
         "events": events_per_bucket(db.events(since, limit=500000), since, max(b, 300)),
         "clients": clients_over_time(db.station_samples_since(since), names, b),
         "rssi": rssi_histogram(db.latest_stations(), now),
-        "traffic": throughput(db.throughput_counters(since), names, router),
+        "traffic": throughput(db.throughput_counters(since, [(ws := wan_source(units))["phys"]]), names, router, ws),
+        "top_users": top_users(db.device_traffic_totals(since), (devs := {d["mac"]: d for d in db.devices()}), router_ip),
+        "switches": switch_series(db.switch_ports_since(since), devs),
         "radio_errors": radio_errors(db.radio_samples_since(since), names),
         "latency": latency_series(pings),
         "heatmap": latency_heatmap(db.ping_minutes(now - 7 * 86400)),
@@ -245,7 +324,18 @@ def device(mac: str, hours: float) -> dict[str, Any]:
         ping = [[p["ts"], p["avg_ms"], p["lost"], p["sent"]] for p in db.ping_minutes(since, d["ip"])]
     daily = [{"day": r["day"], "score": r["score"], "kicks": r["kicks"], "disconnects": r["disconnects"], "avg_rssi": r["avg_rssi"]}
              for r in db.daily_summary((dt.date.today() - dt.timedelta(days=29)).isoformat(), mac)]
+    inet_hist = db.device_traffic_history(since, mac)
+    inet = {"rates": inet_rates(inet_hist), "down_bytes": sum(r["bytes_in"] or 0 for r in inet_hist),
+            "up_bytes": sum(r["bytes_out"] or 0 for r in inet_hist),
+            "daily": [{"day": r["day"], "down_bytes": r["bytes_in"], "up_bytes": r["bytes_out"]}
+                      for r in db.daily_traffic((dt.date.today() - dt.timedelta(days=29)).isoformat(), mac)]}
+    # Wired traffic at the switch port this device is on (UniFi reports which devices are on each port).
+    sw_rows = db.switch_ports_since(since)
+    on = {(r["switch"], r["port"]) for r in sw_rows if mac in (r.get("macs") or "")}
+    lan = switch_series([r for r in sw_rows if (r["switch"], r["port"]) in on], {mac: d}) if on else None
     return {"hours": hours, "signal": signal, "tx_rate": tx, "rx_rate": rx, "down_mbps": down, "up_mbps": up,
+            "internet": inet, "lan": lan,
+            "apps": [{k: a[k] for k in ("app", "category", "bytes_in", "bytes_out")} for a in db.app_traffic(since, mac)[:15]],
             "spans": spans, "events": events_per_bucket(db.events(since, mac=mac, limit=100000), since, max(300, bucket_size(hours))),
             "ping": ping, "daily": daily}
 

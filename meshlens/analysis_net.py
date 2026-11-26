@@ -47,6 +47,9 @@ KEY_PORTS = {53: "DNS server", 445: "file server", 2049: "file server", 8123: "H
 KEY_TYPES = ("nas", "server", "network", "powerline", "switch", "router", "hub", "gateway")
 
 
+INET_HOG_MBPS = 5.0     # internet_hog: average over the hour before it is worth mentioning
+
+
 def key_device_suggestions(devices: list[dict[str, Any]], open_ports: list[dict[str, Any]], now: float | None = None,
                            units: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
     """Devices the rest of the house depends on (servers, switches, hubs, powerline) that aren't watched yet.
@@ -835,6 +838,39 @@ def net_issues(net: dict[str, Any], devs: dict[str, dict[str, Any]], now: float)
                 "Huge numbers of connections usually mean file sharing, a backup or sync tool, or a device that is "
                 "misbehaving or infected. They fill the router's connection table and use its processor.",
                 ["Check what that device is doing; pause file sharing or sync and see if the count drops."]))
+    # One device using most of the internet line for an hour (informational).
+    inet = [r for r in net.get("inet_hour") or [] if (r.get("bytes_in") or 0) + (r.get("bytes_out") or 0) > 0]
+    inet_total = sum(r["bytes_in"] + r["bytes_out"] for r in inet)
+    if inet:
+        t = max(inet, key=lambda r: r["bytes_in"] + r["bytes_out"])
+        b = t["bytes_in"] + t["bytes_out"]
+        span = (t.get("last") or 0) - (t.get("first") or 0)
+        mbps = b * 8 / 3600 / 1e6
+        if span >= 2700 and b >= 0.7 * inet_total and mbps >= INET_HOG_MBPS:
+            subj = t.get("mac") or t.get("ip") or t.get("last_ip")
+            name = display_name(devs_by_mac.get(t["mac"]), t["mac"]) if t.get("mac") else (t.get("ip") or "An unknown device")
+            out.append(_issue(
+                "internet_hog", "info", "device", subj, f"{name} is using most of the internet connection",
+                f"{name} used {100 * b / inet_total:.0f}% of the internet traffic in the last hour, about {mbps:.1f} Mbit/s on "
+                f"average ({b / 1e6:.0f} MB; download {t['bytes_in'] / 1e6:.0f} MB, upload {t['bytes_out'] / 1e6:.0f} MB). Estimate.",
+                "Large downloads, updates, cloud backups and video streaming do this. It is only a problem if other things "
+                "lag at the same time (see Latency and Bufferbloat).",
+                ["If calls or games lag while it runs, schedule the backup or update for the night, or limit it in the app.",
+                 "Turning on QoS (Adaptive QoS or bandwidth limiter) on the router keeps the line responsive under load."],
+                t.get("first"), t.get("last")))
+
+    # Switch ports with errors (managed switches read through UniFi or the TP-Link web page).
+    for p in net.get("switch_ports") or []:
+        errs, pkts = p.get("errors") or 0, max(1, p.get("packets") or 0)
+        if errs >= 50 and errs / pkts >= 0.0005:
+            out.append(_issue(
+                "iface_errors", "medium" if errs / pkts >= 0.005 else "low", "network", f"switch-{p['switch']}-{p['port']}",
+                f"Errors on {p['switch']} port {p['port']}" + (f" ({p['name']})" if p.get("name") else ""),
+                f"{errs} errors in {pkts} packets ({100 * errs / pkts:.2f}%) over the period.",
+                "Errors on a wired link mean damaged frames: usually a poor cable or connector, a cable that is too long, or "
+                "electrical interference.",
+                ["Swap the cable on that port for a known-good one (Cat 5e or better) and check both connectors."]))
+
     warn = by_kind.get("router_warning", [])
     if warn:
         groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
