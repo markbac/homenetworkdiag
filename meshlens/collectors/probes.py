@@ -102,7 +102,8 @@ class ProbeCollector:
 
                 def remove_service(_s, *a):
                     pass
-            self._zc = Zeroconf()
+            from ..net import mdns
+            self._zc = Zeroconf(interfaces=mdns.interfaces())
             ServiceBrowser(self._zc, "_hndprobe._tcp.local.", _L())
         except Exception as e:  # zeroconf missing or the interface refused: UDP beacons still work
             log.info("mDNS browse for probes not available: %s", e)

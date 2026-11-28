@@ -1,0 +1,17 @@
+# MeshLens on a Linux Docker host. Web UI: http://<host>:8787/
+services:
+  meshlens:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: meshlens:latest
+    container_name: meshlens
+    restart: unless-stopped
+    network_mode: host          # LAN sweep, ARP table, mDNS/SSDP, probe discovery need the real network
+    cap_add:
+      - NET_RAW                 # ping
+    environment:
+      - TZ=Europe/London
+    volumes:
+      - ./data:/data            # config.yaml, database, logs, web login, secrets.json
+      - /etc/localtime:/etc/localtime:ro
