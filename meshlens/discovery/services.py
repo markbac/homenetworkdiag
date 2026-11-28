@@ -35,7 +35,8 @@ def mdns_browse(seconds: float = BROWSE_SECONDS) -> dict[str, dict[str, Any]]:
     from zeroconf import ServiceBrowser, Zeroconf, ZeroconfServiceTypes
 
     out: dict[str, dict[str, Any]] = {}
-    zc = Zeroconf()
+    from ..net import mdns
+    zc = Zeroconf(interfaces=mdns.interfaces())
     try:
         try:
             types = set(ZeroconfServiceTypes.find(zc=zc, timeout=3))

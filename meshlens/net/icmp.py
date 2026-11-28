@@ -79,6 +79,11 @@ else:  # pragma: no cover - development on other systems
             return Reply(False, status=-1)
         if "time=" in out:
             return Reply(True, float(out.split("time=")[1].split()[0]))
+        # "From 81.2.3.4 icmp_seq=1 Time to live exceeded" (iputils): the hop that answered
+        for line in out.splitlines():
+            if "Time to live exceeded" in line and line.startswith("From "):
+                who = line.split()[1].rstrip(":")
+                return Reply(False, None, who, 1, ttl_expired=True)
         return Reply(False, status=1)
 
 

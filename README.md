@@ -27,6 +27,26 @@ It is a **tray app started when needed** with a **web control interface** in the
 - **Hide** a known, harmless issue for one device (it is still checked, just not counted); **Show hidden** brings it back.
 - **Setup checklist** (Settings) shows what is left to set up; **key devices** (DNS, NAS, Home Assistant, switches) are suggested for watching.
 
+## Running on a Linux server (Docker)
+
+MeshLens can also run headless on a Linux Docker host on the same LAN (no tray). From this repository on Windows:
+
+```powershell
+.\deploy\deploy.ps1 -Ref main             # deploy main to the default host, 10.0.11.195
+.\deploy\deploy.ps1                       # deploy the working tree, uncommitted changes included
+.\deploy\deploy.ps1 -Ref main -HostName <address>
+```
+
+The script copies the source over SSH, builds the image there and starts it with `docker compose`
+([deploy/docker-compose.yml](deploy/docker-compose.yml)). The web UI is then at `http://<host>:8787/`.
+
+- **Host network**: needed for the LAN sweep, the ARP table, mDNS/SSDP and ESP32 probe discovery.
+- **Data** (config, database, logs, web login) is kept in `~/meshlens/deploy/data` on the host.
+- **Secrets**: there is no credential manager on a server, so passwords and tokens go to `data/secrets.json`
+  (mode 0600) instead. Keep that folder private.
+- **Not available on Linux**: the host-PC Wi-Fi air survey and adapter counters (they use Windows `netsh`),
+  the tray icon and self-update (redeploy instead). Everything else works the same.
+
 ## Documents
 
 | Document | What it covers |

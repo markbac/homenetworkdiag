@@ -15,3 +15,5 @@ config.yaml
 captures/
 packaging/meshlens.ico
 packaging/version_info.txt
+secrets.json
+deploy/data/
